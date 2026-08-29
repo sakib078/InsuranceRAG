@@ -3,10 +3,7 @@
 Retrieval-augmented question answering over Canadian auto insurance policy documents —
 hybrid retrieval, cross-encoder reranked, and **measured at every stage**.
 
-> **Status: in development.** Scaffold complete; corpus assembly next.
-> The results table below is the point of this repository, and it will be filled
-> in with measured numbers as each retrieval stage lands. See [TODO.md](TODO.md)
-> for the build plan.
+> **Status: in development.**
 
 ## Results
 
