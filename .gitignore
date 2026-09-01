@@ -19,7 +19,3 @@ data/traces.jsonl
 
 # Model weights cached by sentence-transformers
 .cache/
-
-
-# md files
-TODO.md
