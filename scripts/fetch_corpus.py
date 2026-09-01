@@ -5,29 +5,23 @@
     python scripts/fetch_corpus.py                     # fetch phase v1, verify checksums
     python scripts/fetch_corpus.py --update-checksums  # fetch and record new checksums
 
-Rows marked `access=manual` are never fetched - FSRA returns 403 to scripts. They are
-listed at the end of the run with the exact path each document is expected at, so the
-manual half of the corpus is reproducible by verification: the SHA-256 in the manifest
-is what proves a hand-downloaded file is the same document the numbers were measured on.
-
-Raw bytes are written untouched. Parsing is Step 2 - hashing a parser's output would
-prove nothing about the source document.
-
-Exit code is non-zero if any fetch failed or any checksum mismatched, so this is safe
-to run in CI.
+`access=manual` rows are listed, never fetched. Raw bytes are written untouched.
+Exit code is non-zero on any failure or checksum mismatch, so this is safe in CI.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import sys
 import time
 from dataclasses import replace
+from datetime import date
 
 import httpx
 
-from insurance_rag.config import RAW_DIR
+from insurance_rag.config import RAW_HTML_DIR
 from insurance_rag.corpus.manifest import (
     Access,
     ManifestRow,
@@ -37,15 +31,54 @@ from insurance_rag.corpus.manifest import (
     write_manifest,
 )
 
-USER_AGENT = "InsuranceRAG/0.1 (research corpus fetch; https://github.com/sakib078/InsuranceRAG)"
+# The "curl" token is required: e-Laws serves a JavaScript shell to any other UA.
+USER_AGENT = (
+    "InsuranceRAG/0.1 (research corpus fetch; https://github.com/sakib078/InsuranceRAG) "
+    "curl/8.4.0"
+)
 TIMEOUT = httpx.Timeout(30.0)
 RETRIES = 3
 BACKOFF_SECONDS = 2.0
-POLITE_DELAY_SECONDS = 1.0  # between successful fetches; e-Laws is a government host
+POLITE_DELAY_SECONDS = 1.0
+
+MIN_DOCUMENT_BYTES = 15_000
+SHELL_MARKER = "e-Laws needs JavaScript"
+STRUCTURE_MARKERS = ('class="section-e"', 'class="section"', "ConsolidationPeriod")
 
 
-def sha256(data: bytes) -> str:
+class NotADocument(Exception):
+    """A 200 response that is not the document we asked for."""
+
+
+def validate_document(row: ManifestRow, content: bytes) -> None:
+    """Reject a 200 response that is a JavaScript shell rather than a document."""
+    if len(content) < MIN_DOCUMENT_BYTES:
+        raise NotADocument(
+            f"{row.doc_id}: {len(content):,} bytes is below the {MIN_DOCUMENT_BYTES:,} floor"
+        )
+    text = content.decode("utf-8", errors="replace")
+    if SHELL_MARKER in text:
+        raise NotADocument(
+            f"{row.doc_id}: got the e-Laws JavaScript shell, not the document. "
+            f"The User-Agent no longer selects the pre-render - see USER_AGENT above."
+        )
+    if not any(marker in text for marker in STRUCTURE_MARKERS):
+        raise NotADocument(
+            f"{row.doc_id}: no e-Laws structural markup found "
+            f"(looked for {', '.join(STRUCTURE_MARKERS)})"
+        )
+
+
+_SCRIPT_RE = re.compile(rb"<script(?:\s[^>]*)?>.*?</script\s*>", re.DOTALL | re.IGNORECASE)
+
+
+def raw_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def content_sha256(data: bytes) -> str:
+    """Stable document identity: e-Laws injects a per-request token inside <script>."""
+    return hashlib.sha256(_SCRIPT_RE.sub(b"", data)).hexdigest()
 
 
 def fetch(client: httpx.Client, row: ManifestRow) -> bytes:
@@ -78,7 +111,7 @@ def main() -> int:
     parser.add_argument(
         "--update-checksums",
         action="store_true",
-        help="write computed SHA-256 values back into the manifest",
+        help="write computed SHA-256 and retrieval_date back into the manifest",
     )
     parser.add_argument(
         "--force", action="store_true", help="re-download even if the local copy verifies"
@@ -103,7 +136,7 @@ def main() -> int:
         print("\ndry run - nothing downloaded")
         return 0
 
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    RAW_HTML_DIR.mkdir(parents=True, exist_ok=True)
     updated: dict[str, str] = {}
     failures: list[str] = []
 
@@ -111,21 +144,20 @@ def main() -> int:
         headers={"User-Agent": USER_AGENT}, timeout=TIMEOUT, follow_redirects=True
     ) as client:
         for row in scriptable:
-            # A local copy that already matches the recorded checksum is the document
-            # the numbers were measured on. Don't re-fetch it.
             if not args.force and row.sha256 and row.raw_path.exists():
-                if sha256(row.raw_path.read_bytes()) == row.sha256:
+                if content_sha256(row.raw_path.read_bytes()) == row.sha256:
                     print(f"  ok       {row.doc_id:<32} cached, checksum verified")
                     continue
 
             try:
                 content = fetch(client, row)
-            except RuntimeError as exc:
+                validate_document(row, content)
+            except (RuntimeError, NotADocument) as exc:
                 print(f"  FAILED   {exc}")
                 failures.append(row.doc_id)
                 continue
 
-            digest = sha256(content)
+            digest = content_sha256(content)
             row.raw_path.write_bytes(content)
             size_kb = len(content) / 1024
 
@@ -135,8 +167,6 @@ def main() -> int:
             elif digest == row.sha256:
                 print(f"  ok       {row.doc_id:<32} {size_kb:8.1f} KB  checksum verified")
             else:
-                # e-Laws reconsolidates without notice; a changed hash is a real event,
-                # not noise. It means the corpus moved under the eval numbers.
                 print(
                     f"  CHANGED  {row.doc_id:<32} {size_kb:8.1f} KB\n"
                     f"           manifest {row.sha256[:16]}...  fetched {digest[:16]}...\n"
@@ -151,8 +181,16 @@ def main() -> int:
             time.sleep(POLITE_DELAY_SECONDS)
 
     if updated and args.update_checksums:
-        write_manifest([replace(r, sha256=updated.get(r.doc_id, r.sha256)) for r in rows])
-        print(f"\nmanifest updated with {len(updated)} checksum(s)")
+        today = date.today().isoformat()
+        write_manifest(
+            [
+                replace(r, sha256=updated[r.doc_id], retrieval_date=today)
+                if r.doc_id in updated
+                else r
+                for r in rows
+            ]
+        )
+        print(f"\nmanifest updated: {len(updated)} checksum(s), retrieval_date {today}")
     elif updated:
         print(
             f"\n{len(updated)} document(s) have no recorded checksum. "

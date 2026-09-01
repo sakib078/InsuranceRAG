@@ -1,18 +1,7 @@
 """The corpus manifest: one row per source document.
 
-`data/manifest.csv` is the single record of what the corpus is, where each document
-came from, whether a script can fetch it, and what licence it carries. It is
-hand-authored and committed; the documents themselves are not (see `.gitignore`).
-
-Three columns make it the scale-up ledger rather than a snapshot:
-
-  ACCESS  script | manual  - FSRA returns 403 to scripts, so part of the corpus is
-          reproducible by *verification* (a recorded SHA-256) rather than by script.
-  PHASE   v1 | v2 | excluded  - v1 is the scriptable layer the first pipeline runs on.
-          Promoting a document is a flag flip, not a rewrite. `excluded` records a
-          decision not to ingest something, so the reasoning is not lost.
-  SHA256  Blank until the first fetch, then fixed. e-Laws reconsolidates without
-          notice; a mismatch means the corpus moved under the eval numbers.
+`data/manifest.csv` is hand-authored and committed; the documents themselves are not.
+It records provenance, access route, licence, and a content checksum per document.
 """
 
 from __future__ import annotations
@@ -22,7 +11,7 @@ from dataclasses import asdict, dataclass, fields
 from enum import StrEnum
 from pathlib import Path
 
-from insurance_rag.config import DATA_DIR, RAW_DIR
+from insurance_rag.config import DATA_DIR, PDF_DIR, RAW_HTML_DIR
 
 MANIFEST_PATH = DATA_DIR / "manifest.csv"
 
@@ -38,15 +27,41 @@ class Phase(StrEnum):
     EXCLUDED = "excluded"
 
 
+class Status(StrEnum):
+    """Whether the document is operative law. Revoked sources render a badge."""
+
+    CURRENT = "current"
+    REVOKED = "revoked"
+
+
+class DocType(StrEnum):
+    """Kind of source document. All but CASE_LAW are valid `Chunk.doc_type` values."""
+
+    POLICY = "policy"
+    ENDORSEMENT = "endorsement"
+    BULLETIN = "bulletin"
+    GUIDE = "guide"
+    REGULATION = "regulation"
+    STATUTE = "statute"
+    CASE_LAW = "case-law"
+
+
+#: The subset that may appear on an ingested chunk.
+CHUNK_DOC_TYPES: frozenset[DocType] = frozenset(DocType) - {DocType.CASE_LAW}
+
+
 @dataclass(frozen=True)
 class ManifestRow:
     doc_id: str
     title: str
     citation: str
     source_url: str
-    doc_type: str
+    doc_type: DocType
     access: Access
+    status: Status
     consolidation_date: str
+    retrieval_date: str
+    local_file: str
     sha256: str
     licence_note: str
     phase: Phase
@@ -54,21 +69,17 @@ class ManifestRow:
 
     @property
     def raw_path(self) -> Path:
-        """Where this document lives once fetched or downloaded by hand."""
-        suffix = Path(self.source_url).suffix.lower()
-        if suffix not in {".html", ".htm", ".pdf", ".txt"}:
-            # e-Laws URLs carry no extension and serve HTML; FSRA rows point at a
-            # landing page, and the PDFs behind it are placed by hand.
-            suffix = ".pdf" if self.access is Access.MANUAL else ".html"
-        return RAW_DIR / f"{self.doc_id}{suffix}"
+        """On-disk location. Manual rows keep the publisher's filename via `local_file`."""
+        if self.access is Access.MANUAL:
+            return PDF_DIR / (self.local_file or f"{self.doc_id}.pdf")
+        return RAW_HTML_DIR / f"{self.doc_id}.html"
 
 
 FIELDNAMES: tuple[str, ...] = tuple(f.name for f in fields(ManifestRow))
 
 
 def load_manifest(path: Path = MANIFEST_PATH) -> list[ManifestRow]:
-    """Read and validate the manifest. Raises on anything malformed - a corpus
-    definition that is quietly wrong is worse than one that fails loudly."""
+    """Read and validate the manifest. Raises on anything malformed."""
     if not path.exists():
         raise FileNotFoundError(f"No manifest at {path}")
 
@@ -87,7 +98,13 @@ def load_manifest(path: Path = MANIFEST_PATH) -> list[ManifestRow]:
         try:
             rows.append(
                 ManifestRow(
-                    **{**raw, "access": Access(raw["access"]), "phase": Phase(raw["phase"])}
+                    **{
+                        **raw,
+                        "access": Access(raw["access"]),
+                        "phase": Phase(raw["phase"]),
+                        "status": Status(raw["status"]),
+                        "doc_type": DocType(raw["doc_type"]),
+                    }
                 )
             )
         except (ValueError, TypeError) as exc:
@@ -102,13 +119,17 @@ def load_manifest(path: Path = MANIFEST_PATH) -> list[ManifestRow]:
         seen.add(row.doc_id)
         if row.phase is not Phase.EXCLUDED and not row.source_url:
             raise ValueError(f"{path} - {row.doc_id} has no source_url")
+        if row.phase is not Phase.EXCLUDED and row.doc_type not in CHUNK_DOC_TYPES:
+            raise ValueError(
+                f"{path} - {row.doc_id} is doc_type {row.doc_type!r}, which cannot be "
+                f"ingested; mark it phase=excluded or give it an ingestable type"
+            )
 
     return rows
 
 
 def write_manifest(rows: list[ManifestRow], path: Path = MANIFEST_PATH) -> None:
-    """Rewrite the manifest in place, preserving column order. Used only by
-    `fetch_corpus.py --update-checksums`."""
+    """Rewrite the manifest in place, preserving column order."""
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=FIELDNAMES)
         writer.writeheader()
@@ -121,9 +142,19 @@ def select(
     *,
     phase: Phase | None = None,
     access: Access | None = None,
+    status: Status | None = None,
+    doc_type: DocType | None = None,
 ) -> list[ManifestRow]:
     return [
         r
         for r in rows
-        if (phase is None or r.phase is phase) and (access is None or r.access is access)
+        if (phase is None or r.phase is phase)
+        and (access is None or r.access is access)
+        and (status is None or r.status is status)
+        and (doc_type is None or r.doc_type is doc_type)
     ]
+
+
+def by_doc_id(rows: list[ManifestRow]) -> dict[str, ManifestRow]:
+    """chunk.doc_id -> provenance, for the citation renderer."""
+    return {r.doc_id: r for r in rows}
