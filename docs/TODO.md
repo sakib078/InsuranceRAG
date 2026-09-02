@@ -155,17 +155,18 @@ if table extraction needs it.
 
 ---
 
-### 🟡 1 — Corpus manifest
-**Mostly done.** `data/manifest.csv` (15 rows) + `insurance_rag/corpus/manifest.py` (typed
-loader, `Access` / `Phase` / `Status` enums) + `scripts/fetch_corpus.py` (UA fix,
-`validate_document`).
+### ✅ 1 — Corpus manifest
+**Done 2026-09-01. 11 of 11 v1 documents on disk.** 5 e-Laws HTML fetched by script into
+`data/raw_html/`; OAP 1 and 5 FSRA guidance PDFs hand-downloaded into `data/pdfs/`.
+See `docs/sourceMap.md` for the corpus and the measured ingestion facts.
 
-- [ ] Add a `retrieval_date` column — the spec asks for it, and provenance is incomplete without it
-- [ ] Extend `doc_type` to the six values in Deviation 2
-- [ ] Promote OAP 1 + 4–6 OPCF endorsements + 2–3 FSRA bulletins from `v2` to `v1`, one row each
-- [ ] Hand-download those PDFs into `data/raw/`, then record SHA-256 with `--update-checksums`
-- [ ] Run the scriptable fetch: `PYTHONPATH=. python scripts/fetch_corpus.py --update-checksums`
-- [ ] **Review:** the checksum diff, before committing
+Delivered: `data/manifest.csv` (23 rows), `insurance_rag/corpus/manifest.py` (typed loader,
+`Access`/`Phase`/`Status`/`DocType` enums, `local_file`, `by_doc_id`), `scripts/fetch_corpus.py`
+(UA fix, `validate_document`, content hashing, `--update-checksums` recording `retrieval_date`).
+
+Corpus changes from the original plan: **no endorsements** — the OPCFs are fillable forms, and
+OAP 1 references neither "OPCF" nor "endorsement", so nothing dangles. AU0134INT dropped, not
+locatable. Guidance set chosen by measuring what SABS cites, not by title.
 
 ---
 
@@ -178,17 +179,33 @@ class Chunk:
     doc_id:        str
     doc_type:      Literal["policy","endorsement","bulletin","guide","regulation","statute"]
     chunk_role:    Literal["coverage","exclusion","definition","condition","schedule","other"]
-    locator:       str        # "OAP1 s.4.2(b)" / "O. Reg. 34/10 s.31(1)(a)" — human-verifiable
+    locator:       str        # "OAP 1 s. 1.8.1" / "O. Reg. 34/10 s. 31(1)(a)"
+    ancestor_path: list[str]  # TOC/markup hierarchy above this chunk
     ordinal:       int        # position, for neighbour fetch
+    page:          int | None # PDF sources only, for the citation line
     defined_terms: list[str]
     text:          str
     token_count:   int        # embedding model's tokenizer, not tiktoken
-    embedding:     list[float]
 ```
 
-`chunk_role` **is the field that makes the agent possible** — it is what lets a search be
-scoped to exclusions only. Classify by rules first (heading text, clause numbering, trigger
-phrases), fall back to an LLM pass for the ambiguous remainder, then spot-check by hand.
+`chunk_role` **is the field that makes the agent possible** — it is what scopes a search to
+exclusions only.
+
+**Measured constraints this schema must satisfy** (see `docs/sourceMap.md`):
+
+- **"exclusion" appears twice in OAP 1's 68 pages.** Exclusions read "Who and What We Won't
+  Cover", "Not Covered", "we will not" (16×). A classifier keying on the literal word mislabels
+  the entire exclusion set while every test passes — and silently breaks the agent's mandatory
+  exclusion check. Classify on **TOC headings + trigger phrases**.
+- **OAP 1 ships a 164-entry embedded TOC, 4 levels deep.** `locator` and `ancestor_path` come
+  from PDF bookmarks; no heading heuristics for the policy layer.
+- **86 leaf TOC entries** include every s. 1.3 defined term individually — the definition index
+  is nearly free.
+- **Two e-Laws dialects:** regulations suffix `-e`, statutes do not.
+
+Deviations from the spec's schema: `embedding` lives in Postgres, not on the dataclass;
+`ancestor_path` and `page` added because the TOC hands them over and the citation contract
+needs the page number.
 
 - [ ] `insurance_rag/schema.py`
 - [ ] **Review:** the schema, before any ingestion code exists
