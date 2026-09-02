@@ -44,7 +44,7 @@ class Chunk:
     ancestor_path: tuple[str, ...]
     ordinal: int
     text: str
-    token_count: int
+    token_count: int  # reference tokenizer, not the encoder's - see TODO Deviation 5
     defined_terms: tuple[str, ...] = ()
     page: int | None = None
 

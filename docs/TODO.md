@@ -17,7 +17,7 @@ this plan is built to resist: anything not on the **Definition of done** list is
 | Storage | **One Postgres 16** — pgvector + tsvector/GIN | Chunk text, embeddings, and full-text index in one store. "One Postgres over a vector DB plus a search engine" is a real architecture answer. |
 | Ingestion | e-Laws pre-render (HTML) + PyMuPDF (PDF) | Two dialects, one chunk schema. |
 | Agent | LangGraph, exclusion check as a **graph edge** | If the model can skip the exclusion check, eventually it will. |
-| Retrieval | BGE bi-encoder + `bge-reranker` cross-encoder | No API key needed to reproduce the retrieval numbers. |
+| Retrieval | **Two bi-encoders; eval picks the winner** — `Qwen3-Embedding-0.6B` vs `bge-m3`, each with its own family cross-encoder | Both run locally, so no API key is needed to reproduce the table. Published scores disagree, and neither was measured on regulation text — see Deviation 8. |
 | Deploy | **AWS** — EC2 t4g.small, docker-compose, public subnet | ~$22–27/mo. AWS + Docker + CI/CD are claimed skills with no artifact behind them. |
 | Eval order | Golden set **before** any retrieval code | Written after, it tests what you happened to build. |
 | Gold labels | Clause **locators**, resolved to chunk IDs at eval time | Survives re-chunking, the agent, and corpus growth. |
@@ -50,15 +50,36 @@ scanned pages rather than index empty chunks. That kills the multimodal plan fro
 previous revision. Reg 668's ~40 collision diagrams get flagged, their scenarios excluded
 from the golden set, and the gap disclosed in the README.
 
-**5. `token_count` uses the embedding model's tokenizer, not tiktoken.** The spec says
-tiktoken; that is OpenAI's BPE and will mis-count for BGE. Use the actual tokenizer, or the
-400–800 token targets measure the wrong thing.
+**5. `token_count` uses one designated reference tokenizer, not tiktoken.** The spec says
+tiktoken; that is OpenAI's BPE and mis-counts for both encoders under test. It cannot be "the
+embedding model's tokenizer" either, now that there are two — chunk boundaries must be
+**identical** across both, or the bake-off in Deviation 8 confounds chunking with encoding.
+`Qwen3-Embedding-0.6B`'s tokenizer is the reference, `token_count` targets the 400–800 band
+against it, and both encoders then embed byte-identical chunks.
 
-**6. `bge-reranker`, not Cohere Rerank.** The spec offers either. Cohere needs an API key,
-which breaks "clone the repo and reproduce the retrieval table."
+**6. A local cross-encoder, not Cohere Rerank.** The spec offers either. Cohere needs an API
+key, which breaks "clone the repo and reproduce the retrieval table." Each bi-encoder is
+paired with its own family's reranker — `Qwen3-Reranker-0.6B` or `bge-reranker-v2-m3` — so the
+comparison is family against family, never a mixed pipeline.
 
 **7. A web-search tier, beyond the spec — week 5, and outside the measured path.** See
 *Citation and disclosure contract* below. It sits after refusal, never inside it.
+
+**8. Two bi-encoders carried into the ablation, not one.** The spec assumes a single embedding
+model. Published scores put `Qwen3-Embedding-0.6B` at **61.83** on MTEB English v2 Retrieval.
+BAAI publishes no comparable figure for `bge-m3`; its aggregate (~63.0) sits just under
+`bge-large-en-v1.5` (64.23 aggregate, 54.29 Retrieval), which suggests m3 trails by roughly
+7–11 points on English. **That is an inference, not a measurement**, and none of those numbers
+were taken on regulation text. Both models are ~0.6B and ~560 MB at int8, both fit t4g.small,
+and the corpus is ~1,500 chunks — so carrying both costs compute we already have, and settles
+the question with our own number instead of someone else's citation.
+
+`bge-large-en-v1.5` is excluded on a measurement rather than a preference. **38% of SABS
+sections exceed its 512-token cap, and those sections hold 76% of the text**: s.3(1)
+definitions runs 3,417 tokens, General Exclusions 1,553, and the median `"does not apply"`
+section 671. A 512 ceiling makes "one clause, one chunk" unimplementable across the 400–800
+band this project exists to demonstrate — and it would truncate the clause-aware rows while
+leaving the 512-token baseline row intact, handicapping the arm under test.
 
 ---
 
@@ -185,7 +206,7 @@ class Chunk:
     page:          int | None # PDF sources only, for the citation line
     defined_terms: list[str]
     text:          str
-    token_count:   int        # embedding model's tokenizer, not tiktoken
+    token_count:   int        # reference tokenizer, not the encoder's - Deviation 5
 ```
 
 `chunk_role` **is the field that makes the agent possible** — it is what scopes a search to
@@ -265,21 +286,36 @@ Up now, not at deploy time. Everything downstream writes here.
 
 Every row of the README table is produced here, in order, each recorded as you go.
 
-### ⬜ 6 — Uniform baseline + eval harness
+### ⬜ 6 — Uniform baseline + eval harness + the encoder bake-off
 The **512-token fixed-window, no structure** row. It exists to prove the clause-aware work
 paid for itself — without it, "clause-aware chunking helped" is unfalsifiable.
 
+Both encoders run here: the cheapest configuration in the plan, and before any architectural
+work has committed to one. Uniform 512-token chunks also keep both context windows out of
+play, so this isolates encoder quality with no length confound.
+
 - [ ] `insurance_rag/chunking/uniform.py` (baseline only)
-- [ ] `insurance_rag/retrieval/dense.py` — pgvector cosine
+- [ ] `insurance_rag/embedding/` — encoder behind an interface; **the model is config, not an import**
+- [ ] Postgres `chunk_embedding(chunk_id, model, embedding vector(1024))` — a `model`
+      discriminator column, not two embedding columns. Both encoders are 1024-dim, but the
+      spaces are incompatible, so every query filters on `model` and each gets its own index.
+- [ ] `insurance_rag/retrieval/dense.py` — pgvector cosine, encoder-parametrised
 - [ ] `evals/retrieval_eval.py` — recall@5, **split single-hop / multi-hop**
-- [ ] **Review:** row 1. Expect multi-hop near zero — that gap is the entire argument for the agent.
+- [ ] **Review:** row 1 **twice, once per encoder**. The winner carries rows 2–5. Expect
+      multi-hop near zero for both — that gap is the entire argument for the agent.
 
 ### ⬜ 7 — Clause-aware chunking → row 2, the ablation delta
 ### ⬜ 8 — BM25 hybrid → row 3
 Postgres `ts_rank`, fused with reciprocal rank fusion. Sparse is what finds `s.4.2(b)` and `OPCF 44R`.
 ### ⬜ 9 — Cross-encoder rerank → row 4
 Rerank the fused top-20 to top-5. Bi-encoders score query and chunk independently and miss
-interaction effects; a cross-encoder reads both together.
+interaction effects; a cross-encoder reads both together. Use the winning encoder's own family
+reranker (Deviation 6).
+
+- [ ] **Re-verify the encoder choice here**, at the final configuration. A bi-encoder that
+      loses at the baseline can still win once rerank is in play — it only has to get the
+      clause into the top-20, which at ~1,500 chunks is a 1.3% recall bar. If the ranking
+      flips, rows 2–5 re-run on the new winner and the README reports both.
 ### ⬜ 10 — Definition index
 Each defined term as its own retrievable unit, keyed by term — so `resolve_definition` is a
 lookup rather than a similarity search.
@@ -365,6 +401,21 @@ project that documents its own running cost reads as production awareness.
 | + cross-encoder rerank | | | | | |
 | + agent with coverage loop | | | | | |
 
+Rows 2–5 run on whichever encoder won Step 6, named in a footnote under the table. The
+architecture deltas are the point of this table, so the encoder is held fixed and every row
+attributes to exactly one change.
+
+**The encoder bake-off table** — identical chunks, identical golden set, encoder swapped:
+
+| Encoder (+ its family reranker) | Params | int8 | recall@5 uniform | recall@5 final config | p95 latency |
+|---|---|---|---|---|---|
+| `Qwen3-Embedding-0.6B` + `Qwen3-Reranker-0.6B` | 0.6B | ~560 MB | | | |
+| `bge-m3` + `bge-reranker-v2-m3` | 568M | ~570 MB | | | |
+
+Two recall columns because the ranking can flip between them — see Step 9. Licence note for
+the README: `bge-m3` is MIT; Qwen3 is Apache 2.0 with an
+[unresolved MS MARCO question](https://github.com/QwenLM/Qwen3-Embedding/issues/166).
+
 ---
 
 # Week 4 — Harden
@@ -436,6 +487,7 @@ Not before, and **not after**. Anything beyond this list is scope creep unless i
 
 - [ ] A live URL a stranger can use in ten seconds without uploading anything
 - [ ] README opening with the filled ablation table, not an architecture diagram
+- [ ] The encoder bake-off table filled, with the losing encoder's numbers published too
 - [ ] recall@5 reported separately for single-hop and multi-hop, with the uniform baseline visible
 - [ ] Exclusion recall and false-answer rate both reported
 - [ ] Every answer in the UI carries a verifiable clause citation **with its source URL,
