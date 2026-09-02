@@ -20,7 +20,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
-RAW_DIR = DATA_DIR / "raw"
+RAW_HTML_DIR = DATA_DIR / "raw_html"
+PDF_DIR = DATA_DIR / "pdfs"
 INDEX_DIR = DATA_DIR / "index"
 EVALS_DIR = REPO_ROOT / "evals"
 RESULTS_DIR = EVALS_DIR / "results"
