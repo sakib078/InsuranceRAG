@@ -1,31 +1,43 @@
 [project]
 name = "insurance-rag"
 version = "0.1.0"
-description = "Canadian auto insurance document RAG - hybrid retrieval, reranked, evaluated"
+description = "Ontario auto insurance document RAG - hybrid retrieval, reranked, evaluated"
 requires-python = ">=3.11"
 
 dependencies = [
-    # retrieval
+    # ingestion - loaders and the one splitter, strictly the langchain ecosystem
+    "langchain-core>=0.3",
+    "langchain-text-splitters>=0.3",
+    "langchain-community>=0.3",     # WebBaseLoader, live e-Laws fetch
+    "langchain-docling>=0.2",       # layout-aware PDF; pulls docling + pypdfium2
+    "pymupdf>=1.24",                # page numbers and scanned-page detection only
+    "beautifulsoup4>=4.12",
+    "lxml>=5.3",
+    # chunking - the reference tokenizer (Deviation 5), loaded directly
+    "transformers>=4.51",
+    # retrieval - two bi-encoders under test, each with its family reranker
+    "langchain-huggingface>=0.1",
     "sentence-transformers>=3.3",
     "torch>=2.6",
-    "rank-bm25>=0.2.2",
-    "chromadb>=0.5.20",
-    # document parsing
-    "pymupdf>=1.24",
-    "pdfplumber>=0.11",
+    # storage - one Postgres: pgvector for dense, tsvector/GIN for sparse
+    "langchain-postgres>=0.0.13",
+    "psycopg[binary]>=3.2",
+    "pgvector>=0.3.6",
     # generation
-    "anthropic>=0.69",
-    # serving
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.32",
+    "langchain-anthropic>=0.3",
+    # config
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
-    # misc
-    "httpx>=0.27",
-    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
+agent = [
+    "langgraph>=0.2.60",
+]
+serve = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+]
 eval = [
     "ragas>=0.2.9",
     "datasets>=3.0",

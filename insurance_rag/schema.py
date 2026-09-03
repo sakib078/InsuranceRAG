@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from insurance_rag.corpus.manifest import DocType
+from insurance_rag.corpus.manifest import CHUNK_DOC_TYPES, DocType
 
 __all__ = ["ChunkRole", "DocType", "Chunk", "make_chunk_id", "LOCATOR_RE"]
 
@@ -44,15 +44,18 @@ class Chunk:
     ancestor_path: tuple[str, ...]
     ordinal: int
     text: str
-    token_count: int  # reference tokenizer, not the encoder's - see TODO Deviation 5
+    token_count: int  # reference tokenizer, not the encoder's - see `docs/plan.md`, Deviation 5
     defined_terms: tuple[str, ...] = ()
     page: int | None = None
+    is_official: bool = True  # AODA diagram text alternatives are not part of the law
 
     def __post_init__(self) -> None:
         if not self.text.strip():
             raise ValueError(f"{self.chunk_id}: empty text")
         if not LOCATOR_RE.match(self.locator):
             raise ValueError(f"{self.chunk_id}: locator {self.locator!r} is not '<cite> s. <path>'")
+        if self.doc_type not in CHUNK_DOC_TYPES:
+            raise ValueError(f"{self.chunk_id}: doc_type {self.doc_type!r} cannot be ingested")
         if self.token_count <= 0:
             raise ValueError(f"{self.chunk_id}: token_count must be positive")
         if self.chunk_id != make_chunk_id(self.doc_id, self.ordinal):
