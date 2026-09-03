@@ -79,7 +79,9 @@ def to_chunks(row: ManifestRow, units: list[Document], terms: set[str]) -> list[
                     chunk_id=make_chunk_id(row.doc_id, ordinal),
                     doc_id=row.doc_id,
                     doc_type=row.doc_type,
-                    chunk_role=classify_role(text, ancestors, locator),
+                    chunk_role=classify_role(
+                        text, ancestors, locator, unit.metadata.get("heading", "")
+                    ),
                     locator=locator,
                     ancestor_path=ancestors,
                     ordinal=ordinal,

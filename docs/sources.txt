@@ -1,3 +1,23 @@
+Langchain docs
+==============================
+
+https://docs.langchain.com/oss/python/integrations/document_loaders
+
+Evals:
+
+https://docs.langchain.com/langsmith/evaluate-rag-tutorial#configure-the-environment
+
+
+Agentic topics
+=--------------------=
+
 https://newsletter.bytebytego.com/p/top-7-ways-to-reduce-llm-costs
 
 https://newsletter.bytebytego.com/p/agent-harness-explained-visually
+
+
+postgres / pgvector
+---------------
+
+https://www.youtube.com/watch?v=j1QcPSLj7u0
+https://www.geeksforgeeks.org/data-science/pgvector/
