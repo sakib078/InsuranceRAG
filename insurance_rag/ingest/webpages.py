@@ -79,6 +79,7 @@ def units_from_html(row: ManifestRow, html: str) -> list[Document]:
                     metadata={
                         "doc_id": row.doc_id,
                         "locator_path": cur["path"],
+                        "heading": cur["ancestors"][-1] if cur["ancestors"] else "",
                         "ancestor_path": cur["ancestors"],
                         "is_table": cur["is_table"],
                     },
