@@ -11,11 +11,11 @@ build/
 .coverage
 htmlcov/
 
-# Source PDFs are fetched by scripts/fetch_corpus.py from the URLs in
-# data/manifest.csv. The manifest is committed; the PDFs are not.
-data/raw/
-data/index/
-data/traces.jsonl
+# Generated corpus artefacts (index dumps, traces) stay out of git. The manifest and
+# the small offline test fixtures are committed.
+data/*
+!data/manifest.csv
+!data/fixtures/
 
 # Model weights cached by sentence-transformers
 .cache/
