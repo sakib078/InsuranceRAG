@@ -47,7 +47,8 @@ class Settings(BaseSettings):
     encoder: Encoder = Encoder.QWEN3
 
     # --- storage ---
-    postgres_dsn: str = "postgresql+psycopg://insurance_01:project-pass@localhost:6024/langchain"
+    # Placeholder only; real credentials live in .env as IRAG_POSTGRES_DSN.
+    postgres_dsn: str = "postgresql+psycopg://langchain:langchain@localhost:6024/langchain"
 
     # --- retrieval knobs (every one of these is an eval variable) ---
     dense_top_k: int = 50
