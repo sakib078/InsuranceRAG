@@ -19,3 +19,7 @@ data/*
 
 # Model weights cached by sentence-transformers
 .cache/
+
+# ignore corpus doc
+
+docs/Canadian Auto-Insurance Corpus and Contradiction-Aware Retrieval Research.md
