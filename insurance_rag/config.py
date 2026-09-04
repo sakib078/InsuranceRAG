@@ -47,10 +47,10 @@ class Settings(BaseSettings):
     encoder: Encoder = Encoder.QWEN3
 
     # --- storage ---
-    postgres_dsn: str = "postgresql://insurance:insurance@localhost:5432/insurance_rag"
+    postgres_dsn: str = "postgresql+psycopg://insurance_01:project-pass@localhost:6024/langchain"
 
     # --- retrieval knobs (every one of these is an eval variable) ---
-    dense_top_k: int = 20
+    dense_top_k: int = 50
     sparse_top_k: int = 20
     fusion_top_k: int = 20
     rerank_top_k: int = 5

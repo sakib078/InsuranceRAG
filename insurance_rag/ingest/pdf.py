@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -15,6 +16,12 @@ __all__ = ["load_pdf", "page_index", "units_from_markdown"]
 #: OAP 1 headings carry their clause number: "1.8 Who and What We Won't Cover".
 _CLAUSE_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)\.?\s+(.*)$")
 _HEADERS = [("#", "h1"), ("##", "h2"), ("###", "h3"), ("####", "h4")]
+
+#: Docling promotes bullets and list markers to headings; they are not provision boundaries.
+_BULLET_RE = re.compile(r"^\s*(?:[·•*\-–]|\(?[ivxlcdm]+[.)]|\(?[a-z][.)])\s+", re.IGNORECASE)
+
+#: A heading longer than this is a sentence Docling mis-promoted, not a title.
+MAX_HEADING_WORDS = 12
 
 #: A page below this many characters is an image, not text - flag it, never index it.
 SCANNED_PAGE_CHARS = 60
@@ -64,11 +71,22 @@ def _is_contents(heading: str, text: str) -> bool:
     return leaders / len(lines) > 0.7
 
 
+def _is_provision(heading: str) -> bool:
+    """A provision heading is numbered or a short title - never a bullet or a sentence."""
+    if _CLAUSE_RE.match(heading):
+        return True
+    if not heading or _BULLET_RE.match(heading):
+        return False
+    stripped = heading.strip()
+    return not stripped.endswith(".") and len(stripped.split()) <= MAX_HEADING_WORDS
+
+
 def units_from_markdown(row: ManifestRow, markdown: str, pages: list[str]) -> list[Document]:
     """Split Docling markdown on its heading stack; the heading gives the locator."""
     splitter = MarkdownHeaderTextSplitter(_HEADERS, strip_headers=False)
     normalised = [_normalise(page) for page in pages]
     units: list[Document] = []
+    seen: Counter[str] = Counter()
 
     for doc in splitter.split_text(markdown):
         text = doc.page_content.strip()
@@ -78,9 +96,17 @@ def units_from_markdown(row: ManifestRow, markdown: str, pages: list[str]) -> li
         heading = stack[-1] if stack else ""
         if _is_contents(heading, text):
             continue
+        # A bullet belongs to the provision above it; splitting there costs the citation.
+        if units and not _is_provision(heading):
+            units[-1].page_content += "\n" + text
+            continue
+
         matched = _CLAUSE_RE.match(heading)
         # Content before the first heading still belongs to the document - never drop it.
         path = matched.group(1) if matched else re.sub(r"\s+", " ", heading).strip() or "Preamble"
+        seen[path] += 1
+        if seen[path] > 1:  # a locator that resolves to two chunks is not a citation
+            path = f"{path} ({seen[path]})"
         units.append(
             Document(
                 page_content=text,
@@ -89,11 +115,15 @@ def units_from_markdown(row: ManifestRow, markdown: str, pages: list[str]) -> li
                     "locator_path": path,
                     "heading": heading,
                     "ancestor_path": stack[:-1],
-                    "is_table": "|" in text and text.count("\n|") >= 2,
+                    "is_table": False,
                     "page": _locate_page(text, normalised),
                 },
             )
         )
+
+    for unit in units:  # merged text can turn a unit into a table, so decide once at the end
+        body = unit.page_content
+        unit.metadata["is_table"] = "|" in body and body.count("\n|") >= 2
     return units
 
 
