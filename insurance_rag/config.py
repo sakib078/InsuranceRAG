@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     encoder: Encoder = Encoder.QWEN3
 
     # --- storage ---
-    # Placeholder only; real credentials live in .env as IRAG_POSTGRES_DSN.
-    postgres_dsn: str = "postgresql+psycopg://langchain:langchain@localhost:6024/langchain"
+    # No default: credentials live in .env only, so none can be committed by accident.
+    postgres_dsn: str = Field(..., description="psycopg3 DSN, e.g. postgresql+psycopg://...")
 
     # --- retrieval knobs (every one of these is an eval variable) ---
     dense_top_k: int = 50
@@ -63,9 +63,10 @@ class Settings(BaseSettings):
     uniform_chunk_tokens: int = 512  # baseline row only
     uniform_overlap_tokens: int = 64
 
-    # --- generation ---
-    anthropic_api_key: str | None = Field(default=None)
-    generation_model: str = "claude-opus-5"
+    # --- generation (open-weight model, served by Groq) ---
+    # Optional so ingestion and retrieval run without it; `chain.py` fails loudly when it is needed.
+    groq_api_key: str | None = Field(default=None, description="IRAG_GROQ_API_KEY, from .env")
+    generation_model: str = "openai/gpt-oss-120b"
 
     # --- agent ---
     max_agent_steps: int = 6

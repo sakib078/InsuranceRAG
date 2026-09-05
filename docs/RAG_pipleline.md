@@ -198,7 +198,7 @@ badly is expected, and is exactly the evidence for adding sparse later — recor
 
 ---
 
-## Phase 3 — Generation
+## Phase 3 — Generation — built
 
 ### Step 1 — `insurance_rag/generation/citations.py`
 
@@ -212,12 +212,12 @@ Not an official version.
 ```
 
 `status == REVOKED` renders a revoked badge — a safety field, not bookkeeping. FSRA rows link,
-never rehost.
+never rehost. `licence_lines()` emits one note per distinct source behind an answer.
 
 ### Step 2 — `insurance_rag/generation/chain.py`
 
 LCEL: `search_corpus` → `format_context` (each chunk prefixed with its locator, so the model can
-only cite what it was given) → `ChatPromptTemplate` → `ChatAnthropic(model=settings.generation_model)`
+only cite what it was given) → `ChatPromptTemplate` → `ChatGroq(model=settings.generation_model)`
 → output parser.
 
 The system prompt encodes the contract, not politeness: never phrase an answer as a
@@ -225,16 +225,41 @@ recommendation, cite every clause used, and refuse with "this corpus does not ad
 when context is empty or off-topic. Two of the spec's three answer states are reachable here;
 the web tier stays off (`enable_web_fallback=False`).
 
+**Open-weight model, no Anthropic credits.** `openai/gpt-oss-120b` served by Groq's free tier.
+`_model()` is the only place the provider appears; `IRAG_GENERATION_MODEL` swaps the model with
+no code change. `temperature=0`, so the same question gives the same answer — Phase 4 diffs
+these against a golden set.
+
 ### Step 3 — `scripts/ask.py`
 
 `python -m scripts.ask "is physiotherapy covered after a minor injury?"` → answer, citation
 blocks, licence line. Appends one JSON line per query to `settings.trace_log_path`.
 
-**Dependency:** `langchain-anthropic`.
+**Dependency:** `langchain-groq`.
 
 **Verify:** the spec's three demo shapes — a covered claim, a question whose answer turns on an
 exclusion, and an off-corpus question. The third must refuse. Open every citation by hand once
 against ontario.ca to confirm the locator is real.
+
+### Phase 3 results
+
+`"is physiotherapy covered after a minor injury?"` refused at k=5 and answered correctly at
+k=20, citing `s. 40(1)`, the MIG treatment blocks, and `s. 38(12)`. The refusal was honest: the
+five nearest chunks were all *adjacent* to the answer (s.40 is fee mechanics, s.3(1) is the
+definition) without containing it. Dense-only ranking, not generation, was the bottleneck —
+which is the same finding as `"s. 31"` from Phase 2, arriving by a different route.
+
+**Two mechanisms came out of that run.**
+
+- **The retry ladder.** `LADDER = (rerank_top_k, fusion_top_k, dense_top_k)` — `(5, 20, 50)`,
+  reusing knobs that already exist rather than adding a new one. `answer()` walks it and stops
+  at the first non-refusal, so a refusal is only believed once all three widths have refused.
+  Cost: a genuinely off-corpus question now spends three model calls instead of one.
+- **Cited sources only.** `cited(text, chunks)` keeps the chunks whose locator appears verbatim
+  in the answer. Rule 2 makes that a substring match, and it handles the model's combined
+  `[A; B]` form for free. Before this, a k=20 run printed twenty citation blocks under a
+  six-clause answer. A cited-nothing answer falls back to the full set — that is a prompt
+  failure, not a reason to publish an answer with no provenance.
 
 ---
 
@@ -247,3 +272,65 @@ FastAPI, and deployment. Phase 2 Step 3 is the single seam all of the retrieval 
 `docs/plan.md` locks "golden set **before** any retrieval code". This iteration knowingly
 inverts that to get one end-to-end path running first — flagged because it is a locked decision
 to reverse or keep deliberately, not by accident.
+
+---
+
+## How a question actually flows
+
+`scripts/ask.py` calls `answer()`, and everything else hangs off that one function.
+
+**1. Retrieve** — `chain.py`, inside `answer()`
+
+```python
+chunks = search_corpus(question, k=width)
+```
+
+`search_corpus` embeds the question with Qwen3's *query* prompt, runs a cosine search in
+pgvector, and hands back `Chunk` objects — not `Document`s. One type flows through generation
+and, later, the agent.
+
+**2. Augment** — `format_context()`
+
+```python
+return "\n\n".join(f"[{c.locator}]\n{c.text}" for c in chunks)
+```
+
+Each excerpt is stamped with its own locator:
+
+```
+[O. Reg. 34/10 s. 18(1)]
+The sum of ... shall not exceed $3,500 ...
+
+[SABS s. 3(1) “accident”]
+...
+```
+
+The locator prefix is the whole trick. The model's only vocabulary of citations is what is
+physically in the prompt, so rule 2 of the system prompt — *never cite a locator that is not in
+the excerpts* — is checkable rather than aspirational.
+
+**3. Prompt** — `SYSTEM` and `USER` in `chain.py`
+
+Two messages: the five rules, then `{context}` + `{question}`. No conversation history, no
+tools. One shot.
+
+**4. Generate** — `_chain()`
+
+```python
+return prompt | _model() | StrOutputParser()
+```
+
+An LCEL pipe. `temperature=0`, so the answer is reproducible.
+
+**5. Retry, or refuse for real** — the `LADDER` loop
+
+If the answer comes back as the refusal, the same question runs again at a wider `k` — 5, then
+20, then 50. Only after all three does the refusal stand. Passing `-k` pins one width and skips
+the ladder entirely, which is what you want when measuring.
+
+**6. Return** — `Answer`
+
+`Answer` carries the chunks alongside the text, filtered by `cited()` to the ones the answer
+leans on. `ask.py` renders citation blocks from `result.chunks`, **never** from anything the
+model wrote — so a hallucinated bracket in the prose cannot become a citation block. It can
+only produce a claim with no source under it, which is visible.
