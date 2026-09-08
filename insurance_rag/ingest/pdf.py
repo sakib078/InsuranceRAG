@@ -23,6 +23,11 @@ _BULLET_RE = re.compile(r"^\s*(?:[·•*\-–]|\(?[ivxlcdm]+[.)]|\(?[a-z][.)])\s
 #: A heading longer than this is a sentence Docling mis-promoted, not a title.
 MAX_HEADING_WORDS = 12
 
+_MONTHS = "january|february|march|april|may|june|july|august|september|october|november|december"
+
+#: FSRA covers put the issue date in a heading; a date is never a provision path.
+_DATE_RE = re.compile(rf"^\s*(?:\d{{1,2}}\s+)?(?:(?:{_MONTHS})\s+)?\d{{4}}\s*$", re.IGNORECASE)
+
 #: A page below this many characters is an image, not text - flag it, never index it.
 SCANNED_PAGE_CHARS = 60
 
@@ -71,11 +76,19 @@ def _is_contents(heading: str, text: str) -> bool:
     return leaders / len(lines) > 0.7
 
 
-def _is_provision(heading: str) -> bool:
-    """A provision heading is numbered or a short title - never a bullet or a sentence."""
+def _cover_headings(row: ManifestRow) -> set[str]:
+    """The document's own name, in the forms a cover page repeats it back as a heading."""
+    title, citation = _normalise(row.title), _normalise(row.citation)
+    return {title, citation, title.removeprefix(citation)} - {""}
+
+
+def _is_provision(heading: str, row: ManifestRow) -> bool:
+    """A provision heading is numbered or a short title - never a bullet, date, or the doc's name."""
     if _CLAUSE_RE.match(heading):
         return True
-    if not heading or _BULLET_RE.match(heading):
+    if not heading or _BULLET_RE.match(heading) or _DATE_RE.match(heading):
+        return False
+    if _normalise(heading) in _cover_headings(row):
         return False
     stripped = heading.strip()
     return not stripped.endswith(".") and len(stripped.split()) <= MAX_HEADING_WORDS
@@ -96,14 +109,19 @@ def units_from_markdown(row: ManifestRow, markdown: str, pages: list[str]) -> li
         heading = stack[-1] if stack else ""
         if _is_contents(heading, text):
             continue
+        provision = _is_provision(heading, row)
         # A bullet belongs to the provision above it; splitting there costs the citation.
-        if units and not _is_provision(heading):
+        if units and not provision:
             units[-1].page_content += "\n" + text
             continue
 
         matched = _CLAUSE_RE.match(heading)
-        # Content before the first heading still belongs to the document - never drop it.
-        path = matched.group(1) if matched else re.sub(r"\s+", " ", heading).strip() or "Preamble"
+        # Content before the first heading still belongs to the document - never drop it,
+        # and never let a cover page's title become the locator of the text beneath it.
+        if not provision:
+            path = "Preamble"
+        else:
+            path = matched.group(1) if matched else re.sub(r"\s+", " ", heading).strip() or "Preamble"
         seen[path] += 1
         if seen[path] > 1:  # a locator that resolves to two chunks is not a citation
             path = f"{path} ({seen[path]})"
