@@ -69,9 +69,8 @@ BAAI publishes no comparable figure for `bge-m3`; its aggregate (~63.0) sits jus
 `bge-large-en-v1.5` (64.23 aggregate, 54.29 Retrieval), which suggests m3 trails by roughly
 7–11 points on English. **That is an inference, not a measurement**, and none of those numbers
 were taken on regulation text. Both models are ~0.6B and ~560 MB at int8, both fit a 2 GB box,
-and the corpus is ~2,900 chunks, heading to ~3,900 after the iteration-2 promotion — so
-carrying both costs compute we already have, and settles the question with our own number
-instead of someone else's citation.
+and the corpus is 3,897 chunks over 20 documents — so carrying both costs compute we already
+have, and settles the question with our own number instead of someone else's citation.
 
 `bge-large-en-v1.5` is excluded on a measurement rather than a preference. **38% of SABS
 sections exceed its 512-token cap, and those sections hold 76% of the text**: s.3(1)
@@ -172,20 +171,23 @@ before-number, which is why the golden set comes first.
    above was designed for — but the dense-only baseline row will read worse than iteration 1
    felt. Measure it, record it, then fix it in Phase 4.
 
-2. **`insurance-act-part-vi` stays at ~1,979 chunks**, roughly two-thirds of the corpus and
-   mostly life/fire/mutual licensing. No mitigation is built; `search_corpus(doc_filter=...)`
-   already exists if a later measurement shows it dominating the candidate pool.
+2. **`insurance-act-part-vi` stays at 1,980 chunks** — 51% of the frozen corpus, down from 68%
+   purely by dilution, and still mostly life/fire/mutual licensing. No mitigation is built;
+   `search_corpus(doc_filter=...)` already exists if a later measurement shows it dominating the
+   candidate pool.
 
 ---
 
-## Phase 0 — Freeze the corpus
+## Phase 0 — Freeze the corpus — **done 2026-09-08, except the embed/index tail**
 
 Nothing downstream can start until chunk locators stop moving. Gold labels are locators, so
 any ingest change after Phase 1 invalidates hand-written labels.
 
-### Step 0.1 — Promote the v2 rows
+Full per-document inventory with acquisition tags: `docs/sourceMap.md`.
 
-`data/manifest.csv`, flip `phase` `v2` → `v1` on five rows:
+### Step 0.1 — Promote the v2 rows, and add four — done
+
+`data/manifest.csv`, flipped `phase` `v2` → `v1` on five rows:
 
 | doc_id | Why it earns a place |
 |---|---|
@@ -195,54 +197,136 @@ any ingest change after Phase 1 invalidates hand-written labels.
 | `sabs-o-reg-403-96` | **revoked** — negative distractor |
 | `sabs-rro-672` | **revoked** — negative distractor |
 
-Their `sha256` and `retrieval_date` columns are empty and must be filled by the fetch.
+Four rows added beyond the original plan, after reviewing the Ontario slice of the corpus
+research doc:
 
-### Step 0.2 — Fix the locator bugs first
+| doc_id | Type | Why |
+|---|---|---|
+| `uninsured-auto-rro-676` | regulation | Its terms, exclusions and limits are required in **every** motor-vehicle liability policy. Pairs with `motor-vehicle-accident-claims-act`: 676 is the coverage, the Act is the fund. |
+| `opcf-49` | endorsement | Pure coverage **removal** — the adversarial shape |
+| `opcf-20` | endorsement | Adds coverage; replaces OAP 1 s. 7.4.4 and interacts with `fsra-transportation-expense` |
+| `opcf-44r` | endorsement | Modifies uninsured/underinsured limits, so it entangles with Reg 676 |
 
-These are ingest bugs that produce unciteable locators. Fixing them *after* the golden set
-breaks every label that touches them.
+**`doc_type=endorsement` was declared in the schema and used by zero documents** while Phase 7
+specifies an agent that checks endorsements before answering. Three documents now back it.
 
-- `insurance_rag/ingest/pdf.py` — FSRA guidelines emit title-as-locator:
-  `FSRA AU0026ORG s. February 2014`, `s. Minor Injury Guideline (2)`,
-  `s. Appendix B Minor Injury Guideline Fee Schedule`. A date is not a provision path.
-  Suppress heading text that is a date or repeats the document title; fall back to an
-  ordinal path (`s. 1`, `s. 2`) so `LOCATOR_RE` still passes and the locator is stable.
-- `insurance_rag/ingest/roles.py` — `harvest_terms()` runs over whatever the invocation
-  loaded, so a `--doc-id` run tags different `defined_terms` than a full run. Persist to
-  `data/chunks/_terms.json` on a full run and read it back otherwise.
+**Corpus: 20 v1 documents** — 11 script, 9 manual. Six e-Laws documents fetched and checksummed;
+all validated as real structured markup, no JS shells. Deliberately excluded: the multi-province
+corpus, three historical OAP 1 editions (blocked on schema — no `effective_from` / `supersedes`),
+OAP 4 / garage forms, and the ~66 transactional FSRA forms, which record rather than determine
+coverage.
 
-### Step 0.3 — Re-fetch, re-ingest, re-embed, re-index
+### Step 0.2 — Fix the locator bugs — done, two known gaps
+
+`insurance_rag/ingest/pdf.py`:
+
+- `_DATE_RE` rejects a heading that is only a date or bare year.
+- `_cover_headings(row)` derives the document's own name from `row.title`, `row.citation` and
+  title-minus-citation; `_is_provision(heading, row)` rejects an exact match. Exact, not
+  substring, so a real `Coverage` heading survives a title containing that word.
+- A rejected heading with no unit above it falls back to `Preamble` rather than keeping the bad
+  path — that is what turns `OPCF 20 s. OPCF 20` into `OPCF 20 s. Preamble`.
+
+`notebooks/embed_colab.ipynb` — `max_seq_length` 1024 → 2048. Two table chunks exceed 1024
+(`OAP 1 s. Statutory Accident Benefits Protected` at 1431, `AU0129DEC s. Monetary Amounts` at
+1306). Tables are never split by design, so at 1024 they were **silently truncated at embedding
+time** — and a coverage table truncated from the bottom loses its dollar figures while keeping
+its headers. Qwen3-Embedding is a 32k model and batches pad to their own longest member, so the
+raise costs nothing.
+
+**Not done — `harvest_terms()` still has no `data/chunks/_terms.json`.** A `--doc-id` run
+therefore still tags different `defined_terms` than a full run. Only full runs have been used,
+so the corpus is self-consistent; the hazard is a later partial re-ingest.
+
+**Two locator defects survive**, both because the rule is too narrow:
+
+| Locator | Cause |
+|---|---|
+| `FSRA AU0129DEC s. 2026` | `_CLAUSE_RE` is tested before `_DATE_RE`, so a leading year in "2026 Auto Indexation Amounts…" is captured as a clause number |
+| `FSRA approved form OAP 1 s. Ontario Automobile Policy` | the heading is a **prefix** of the title, not an exact match |
+
+Accepted for this pass. Fixing them costs two more chunks and a re-embed of two documents.
+
+**Also accepted, recorded so the golden set can route around them:**
+
+- `AU0053ORG` and `AU0054ORG` fail Docling entirely and fall back through `COVERAGE_FLOOR` to
+  page units — 2 and 3 chunks, cited `s. p. 1`. The attendant-care two-hop the manifest promises
+  will cite page numbers, not provisions.
+- `AU0125ORG s. Follow FSCO on social media` — web chrome captured in the PDF, one chunk.
+- `AU0125ORG` has duplicate section names (`Authorized Expenses (2)`, `Use of Automobiles (2)`).
+  Unresolved: duplicate render, or two genuine benefit periods.
+- **Roles are weak on the PDF path.** MIG is 20 `other` of 24; Reg 676 is 26 `other` of 29 with
+  zero `coverage` despite *being* the uninsured coverage schedule; `OPCF 20 s. 2` ("What We Will
+  Pay") classifies `exclusion` and `s. 3` ("Limitations On Your Coverage") classifies `schedule`
+  — backwards. **`chunk_role` is metadata: fixing it needs a re-index, not a re-embed.** It can
+  therefore wait until after Phase 2 without disturbing the frozen ids.
+
+The e-Laws path needs no work. `s. 31(1)` classifies `exclusion` under
+`PART VII GENERAL EXCLUSIONS`, `s. 14` is `coverage`, `s. 18(1)` is `schedule` under "Monetary
+limits" — locators, roles and ancestor paths all correct across all 16 documents.
+
+### Step 0.3 — Re-fetch, re-ingest, re-embed, re-index — half done
 
 ```
-python -m scripts.fetch_corpus                 # picks up the 5 promoted rows
-python -m scripts.ingest                       # full run, so _terms.json is authoritative
-# notebooks/embed_colab.ipynb  -> only the 5 new .npz; existing ones stay valid
-python -m scripts.index --embeddings data/embeddings
+python -m scripts.fetch_corpus --update-checksums   # done: 6 new documents, hashes recorded
+python -m scripts.ingest                            # done: 3,897 chunks over 20 documents
+# notebooks/embed_colab.ipynb   -> TODO
+python -m scripts.index --embeddings data/embeddings  # TODO
 ```
 
-Existing documents' chunk text does not change, so their cached `.npz` remain correct. Delete
-the collection before re-indexing anyway — ordinals shift silently, and `oap-1:0042` meaning a
-different provision is the failure mode that cost a day in iteration 1.
+The e-Laws documents' chunk text did not change, so their `.npz` remain valid; only the PDF
+documents `pdf.py` touched need re-embedding. Delete the collection before re-indexing anyway —
+ordinals shift silently, and `oap-1:0042` meaning a different provision is the failure mode that
+cost a day in iteration 1.
 
 **The Colab upload trap:** `files.upload()` writes `chunks (1).zip` when `chunks.zip` already
 exists, and the notebook then unzips the stale file. Add `rm -f chunks*.zip` before the upload
-cell.
+cell, and rebuild `data/chunks.zip` from the current chunks first.
+
+**A trap the id guard cannot catch:** `opcf-49` kept 2 chunks while its text changed, so ids
+match and vectors would not. It has never been embedded, so nothing is stale today — but equal
+chunk counts are not proof that vectors are current.
+
+### Phase 0 as built — 3,897 chunks, 20 documents
+
+| Document | Chunks | | Document | Chunks |
+|---|---|---|---|---|
+| `insurance-act-part-vi` | 1,980 | | `motor-vehicle-accident-claims-act` | 130 |
+| `sabs-o-reg-403-96` **revoked** | 568 | | `auto-insurance-rro-664` | 129 |
+| `sabs-o-reg-34-10` | 395 | | `compulsory-auto-insurance-act` | 112 |
+| `oap-1` | 221 | | `sabs-rro-672` **revoked** | 92 |
+| `fault-rules-rro-668` | 64 | | `disputes-between-insurers-o-reg-283-95` | 52 |
+| `court-proceedings-o-reg-461-96` | 43 | | `uninsured-auto-rro-676` | 29 |
+| `fsra-minor-injury-guideline` | 24 | | `fsra-indexation-amounts` | 20 |
+| `opcf-44r` | 14 | | `fsra-transportation-expense` | 13 |
+| `opcf-20` | 4 | | `fsra-attendant-care-rate-revised` | 3 |
+| `fsra-attendant-care-rate` | 2 | | `opcf-49` | 2 |
+
+Two findings worth carrying into Phase 1:
+
+1. **The revoked SABS is bigger than the current one** — 568 chunks against 395, 89 sections
+   against 81, 431 subsections against 263. The distractor has more surface area than the law it
+   competes with, so expect it to win more retrieval slots than intuition suggests. This is what
+   `revoked-leak rate` is for.
+2. **`insurance-act-part-vi` is now 51% of the corpus**, down from 68%, purely by dilution. Still
+   the single largest source of non-auto text.
 
 ### Verify
 
-- The manifest loads and reports the new row count.
-- Per-document chunk counts are recorded in `docs/RAG_pipleline.md`.
-- No locator in `data/chunks/*.jsonl` matches `s. (January|…|December) \d{4}`.
-- `python -m insurance_rag.retrieval.search "income replacement benefit" -k 10` returns hits
-  from **both** SABS versions — confirming the distractor is live and the problem is real.
+- Manifest loads and reports 20 v1 rows — ✅ done.
+- Per-document chunk counts recorded — ✅ done, in the table above.
+- No locator matches `s. (January|…|December) \d{4}` — ✅ done; `s. 2026` survives via the
+  clause-number path, recorded above.
+- `python -m insurance_rag.retrieval.search "income replacement benefit" -k 10` returns hits from
+  **both** SABS versions — pending the index.
 
 ### Exit criteria
 
-Chunk ids and locators are frozen. Nothing in `insurance_rag/ingest/` changes again until
-Phase 3, which writes to a separate directory and does not disturb these.
+Chunk ids and locators are frozen at 3,897. Nothing in `insurance_rag/ingest/` changes again
+until Phase 3, which writes to a separate directory and does not disturb these. Role
+classification is the one exception: metadata-only, re-index without re-embed.
 
 ---
-
 ## Phase 1 — The golden set
 
 The gate. `evals/golden.jsonl`, 40–60 pairs, hand-written, labelled by locator.
