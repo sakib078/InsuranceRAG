@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 from bs4 import BeautifulSoup
 from langchain_core.documents import Document
@@ -66,6 +67,7 @@ def units_from_html(row: ManifestRow, html: str) -> list[Document]:
             table.decompose()
 
     units: list[Document] = []
+    seen: Counter[str] = Counter()
     ancestors: list[str | None] = [None] * 4
     section = provision = ""
     cur: dict | None = None
@@ -73,12 +75,16 @@ def units_from_html(row: ManifestRow, html: str) -> list[Document]:
     def flush() -> None:
         nonlocal cur
         if cur and any(part.strip() for part in cur["parts"]):
+            path = cur["path"]
+            seen[path] += 1
+            if seen[path] > 1:  # a locator that resolves to two chunks is not a citation
+                path = f"{path} ({seen[path]})"
             units.append(
                 Document(
                     page_content="\n".join(cur["parts"]).strip(),
                     metadata={
                         "doc_id": row.doc_id,
-                        "locator_path": cur["path"],
+                        "locator_path": path,
                         "heading": cur["ancestors"][-1] if cur["ancestors"] else "",
                         "ancestor_path": cur["ancestors"],
                         "is_table": cur["is_table"],
