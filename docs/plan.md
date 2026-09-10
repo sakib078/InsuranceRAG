@@ -15,7 +15,7 @@ bottom of this file.
 | Storage | **One Postgres 16** — pgvector + tsvector/GIN | Chunk text, embeddings, and full-text index in one store. "One Postgres over a vector DB plus a search engine" is a real architecture answer. |
 | Ingestion | e-Laws pre-render (HTML) + PyMuPDF (PDF) | Two dialects, one chunk schema. |
 | Agent | LangGraph, exclusion check as a **graph edge** | If the model can skip the exclusion check, eventually it will. |
-| Retrieval | **Two bi-encoders; eval picks the winner** — `Qwen3-Embedding-0.6B` vs `bge-m3`, each with its own family cross-encoder | Both run locally, so no API key is needed to reproduce the table. Published scores disagree, and neither was measured on regulation text — see Deviation 8. |
+| Retrieval | **Two bi-encoders; eval picks the winner** — `Qwen3-Embedding-0.6B` vs `bge-m3`, each with its own family cross-encoder | Both run locally. Published scores disagree, and neither was measured on regulation text — see Deviation 8. **Amended in iteration 2:** the models still run locally, but the eval harness now runs on LangSmith, so reproducing the table needs a key after all. |
 | Eval order | Golden set **before** any retrieval code | Written after, it tests what you happened to build. Iteration 1 knowingly inverted this to get one end-to-end path running; iteration 2 restores it. |
 | Gold labels | Clause **locators**, resolved to chunk IDs at eval time | Survives re-chunking, the agent, and corpus growth. |
 
@@ -119,7 +119,7 @@ recommendation; always attach verifiable citations; surface uncertainty explicit
 | State | Rendering | Counted in evals? |
 |---|---|---|
 | **Answered from corpus** | clause locator + source URL + consolidation date + licence line | yes — recall@5, exclusion recall |
-| **Not in corpus** (refusal) | "this corpus does not address that" | yes — **false-answer rate** |
+| **Not in corpus** (refusal) | "this corpus does not address that" | yes — **Correctness**, judged against the refusal as the reference answer |
 | **Public sources say…** | visually distinct block, URL + retrieval date, **no clause locator**, marked unverified and not exclusion-checked | **no** |
 
 State 3 layers *on top of* state 2 — the refusal still fires and is still tested. This is the
@@ -139,7 +139,7 @@ address a question. That is the whole of the pipeline that exists.
 **What it cannot do is prove anything.** The README ablation table is empty, `evals/` holds
 one `.gitkeep`, and `tests/` holds one `__init__.py`. Every claim in the repo is currently an
 assertion. Spec v2's Definition of Done turns on numbers this project has not produced:
-recall@5 split single-hop / multi-hop, exclusion recall, false-answer rate, a visible
+recall@5 split single-hop / multi-hop, exclusion recall, citation accuracy, a visible
 uniform-chunker baseline, and a CI gate that fails when they regress.
 
 Two failures are already measured and both point the same way:
@@ -160,6 +160,34 @@ before-number, which is why the golden set comes first.
 | `insurance-act-part-vi` | Keep whole; do not slice |
 | Order | Golden set and harness **before** any new retrieval code |
 | Ablation | One technique per row, measured against the same frozen corpus |
+| Eval platform | **LangSmith owns the whole eval stack** — datasets, experiments, tracing, and the retrieval metrics as custom evaluators |
+| Golden set | Authored by hand, including a reference `answer` per record |
+
+### The eval-platform choice, and what it costs
+
+LangSmith ships four evaluators, all LLM-as-judge: Correctness, Relevance, Groundedness,
+Retrieval Relevance. **None of the metrics this project reports exist there** — recall@5 by hop,
+exclusion recall and citation accuracy are all written as custom evaluators regardless. What
+LangSmith buys is experiment comparison across the five ablation rows, tracing with p95 latency
+and cost per query, a pytest hook for the CI gate, and one fewer library than ragas.
+
+**One claim in the README dies, and must be corrected rather than quietly left standing:**
+*"No API key is required to reproduce the numbers in the results table."* A LangSmith key is now
+required. This is the same reasoning that rejected Cohere Rerank in Deviation 6, so reversing it
+is a real trade, not an oversight — taken for the experiment tooling.
+
+**The golden set is authored by hand, and that is the reason.** A first pass drafted from the
+chunk files was discarded: it was written with the current failures already known — that `s. 31`
+has no dense signal, that paraphrases return disjoint evidence — which biases the set toward
+weaknesses Phases 4–5 are about to fix, and inflates the gain they appear to deliver. Spec v2
+warns about the mirror image of this ("you will unconsciously author questions your
+implementation already answers"); the fix in both directions is the same one, and it is the
+reason the locked decision puts the golden set first.
+
+**One amendment to "everything in LangSmith":** `evals/golden.jsonl` stays committed in git as
+the source of truth and is pushed to LangSmith from there. A dataset that lives only in a vendor
+account is not diffable, not reviewable in a pull request, and gone if the free tier lapses.
+LangSmith runs the experiments; git holds the labels.
 
 ### Two consequences, accepted deliberately
 
@@ -307,7 +335,7 @@ Two findings worth carrying into Phase 1:
 1. **The revoked SABS is bigger than the current one** — 568 chunks against 395, 89 sections
    against 81, 431 subsections against 263. The distractor has more surface area than the law it
    competes with, so expect it to win more retrieval slots than intuition suggests. This is what
-   `revoked-leak rate` is for.
+   **Citation accuracy** is for — citing revoked law as current is an inaccurate citation.
 2. **`insurance-act-part-vi` is now 51% of the corpus**, down from 68%, purely by dilution. Still
    the single largest source of non-auto text.
 
@@ -345,13 +373,22 @@ The gate. `evals/golden.jsonl`, 40–60 pairs, hand-written, labelled by locator
   "gold_locators": ["O. Reg. 34/10 s. 18(1)", "FSRA AU0026ORG s. 1"],
   "exclusion_locators": ["O. Reg. 34/10 s. 18(1)"],
   "answerable": true,
-  "notes": "the $3,500 cap is the answer; s.40 fee mechanics are adjacent, not the answer"
+  "answer": "Yes, but capped. Treatment for a minor injury is limited to $3,500 for medical and rehabilitation goods and services, and the Minor Injury Guideline governs what is payable within it."
 }
 ```
 
+`answer` is the reference answer — what a correct response would say. Phase 2 maps it into the
+LangSmith example.
+
+Write it as what the documents say, in one or two sentences, in the register the system is meant
+to answer in — never as advice, and never as a phrasing the model is expected to match word for
+word. Correctness is judged by an LLM against meaning, not string overlap. On `answerable: false`
+records `answer` is the refusal text.
+
 - `exclusion_locators` is the subset of gold that limits or excludes. Empty when none applies.
   **Exclusion recall is computed only over records where this is non-empty.**
-- `answerable: false` records carry empty `gold_locators` and drive false-answer rate.
+- `answerable: false` records carry empty `gold_locators`, and their `answer` is the refusal
+  text — which is what lets Correctness score a false answer as wrong.
 - Every locator is copied from an actual chunk in `data/chunks/*.jsonl`, never typed from
   memory — a gold label that resolves to nothing silently scores zero forever.
 
@@ -374,19 +411,30 @@ non-zero on any that matches no chunk. Run before a single metric is computed.
 
 ### Exit criteria
 
-Every locator resolves. All three slices populated. Committed **before** Phase 2 code exists.
+Every locator resolves. All three slices populated. `golden.jsonl` committed **before** Phase 2
+code exists, and pushed to the LangSmith dataset from the committed file.
 
 ---
 
 ## Phase 2 — The eval harness and the baseline row
 
 ```
-evals/golden.jsonl           the set from Phase 1
-evals/validate_golden.py     locator resolver / guard
-evals/run_retrieval.py       recall@5 split by hop, exclusion recall, p95 latency
-evals/run_generation.py      false-answer rate, ragas — after retrieval is settled
-evals/results/{config}.json  one file per ablation row
+evals/golden.jsonl           the set from Phase 1 — committed, the source of truth
+evals/validate_golden.py     locator resolver / guard, offline
+evals/push_dataset.py        sync golden.jsonl -> LangSmith dataset (idempotent, by id)
+evals/evaluators.py          custom evaluators: citation accuracy, exclusion recall,
+                             recall@5 by hop
+evals/run_eval.py            client.evaluate(target, data=..., evaluators=[...])
 ```
+
+**Mapping `evals/golden.jsonl` onto a LangSmith example.** `answer` is the field that makes this
+trivial: `question` becomes `inputs`, `answer` becomes `outputs.answer`, and the rest —
+`gold_locators`, `exclusion_locators`, `hop`, `answerable` — ride along as example metadata the
+custom evaluators read back rather than re-derive. `answer` also feeds LangSmith's
+**Correctness** judge, which needs a reference to compare against.
+
+There is no `evals/results/*.json`. Experiment results live in LangSmith, one experiment per
+ablation row, named for the configuration.
 
 **Locator → chunk id resolution.** Built once from `data/chunks/*.jsonl`, reusing
 `store.read_chunks()`. A gold locator matches when `chunk.locator == gold` **or**
@@ -394,20 +442,40 @@ evals/results/{config}.json  one file per ablation row
 count as the same provision. This is what makes locator labels survive re-chunking, which is
 the whole reason they were chosen.
 
-| Metric | Definition |
-|---|---|
-| recall@5 single-hop | ≥1 gold chunk in top-5 |
-| recall@5 multi-hop | **all** gold chunks in top-5 — the number that exposes the real failure |
-| exclusion recall | ≥1 `exclusion_locators` chunk in top-5, over records where it is non-empty |
-| revoked-leak rate | share of current-law questions with a `status=REVOKED` chunk in top-5 |
-| p95 latency | from the trace log |
+### The four LangSmith built-ins
 
-`revoked-leak rate` is beyond the spec. It exists because Phase 0 deliberately introduced the
-distractor, and an unmeasured distractor is just noise.
+| Evaluator | Goal | Mode |
+|---|---|---|
+| **Correctness** | how close the answer is to ground truth | needs `outputs.answer` — the reference |
+| **Relevance** | whether the answer addresses the question asked | reference-free; answer vs input |
+| **Groundedness** | whether the answer agrees with the retrieved chunks — hallucination check | reference-free; answer vs retrieved docs |
+| **Retrieval relevance** | whether the retrieved chunks match the query | reference-free; question vs retrieved docs |
 
-Produces `evals/results/dense_clause_aware.json` — the current pipeline, unchanged. This is the
-before-number every later phase is measured against. Multi-hop recall is expected to be poor.
-Record it; do not fix it here.
+All four are LLM-as-judge. Correctness is the one the golden set's `answer` field exists for.
+
+### Custom evaluators — only what the product is judged on
+
+What matters for this application is an **accurate answer** carrying an **accurate citation**.
+Nothing else earns a column.
+
+| Evaluator | Definition | Why it cannot be a built-in |
+|---|---|---|
+| **Citation accuracy** | every locator the answer cites resolves to a real chunk, was in the retrieved set, and is not from a `status=REVOKED` document; and the gold locators are among those cited | No generic evaluator knows what a locator is, or which documents are revoked. This is the product's core promise measured directly |
+| **Exclusion recall** | ≥1 `exclusion_locators` chunk in top-5, over records where that field is non-empty | Domain-specific, and it must read the **hand-written** label — computing it from `chunk_role` would measure the classifier, which is wrong on exactly the provisions that matter (`s. 6(2)`) |
+| **recall@5, split single / multi** | single: ≥1 gold chunk in top-5. multi: **all** gold chunks in top-5 | Ground truth beats LLM judgment where ground truth exists — this is the stricter sibling of Retrieval relevance, and it is what the ablation table is built on |
+
+Pure set arithmetic over locators. No LLM, no cost, no key — so they stay reproducible offline
+even though the experiments run hosted.
+
+**One conflict to settle:** spec v2's Definition of Done requires "recall@5 reported separately
+for single-hop and multi-hop, with the uniform-chunker baseline visible." That is why recall@5
+survives the cut above despite not being answer-shaped — it is the only metric that isolates
+*where* a regression happened. Drop it and a fall in Correctness cannot be attributed to
+retrieval or to generation.
+
+The first experiment records the current pipeline unchanged. This is the before-number every
+later phase is measured against. Multi-hop recall is expected to be poor. Record it; do not fix
+it here.
 
 ---
 
@@ -504,7 +572,10 @@ Per spec v2 §07–08, in this order:
 
 1. `pytest` — clause-boundary parsing, locator format, `chunk_role` classification, RRF maths.
 2. Golden-set regression test + **CI gate that fails the build when recall or exclusion recall
-   drops**. Spec: worth more than the rest of the CI config combined.
+   drops**. Spec: worth more than the rest of the CI config combined. Runs through LangSmith's
+   pytest integration, which means **CI needs `LANGSMITH_API_KEY` as a repository secret** — and
+   a fork's pull request cannot see it. Decide then whether the gate runs on forks at all, or
+   whether `validate_golden.py` (offline) is the only check a fork gets.
 3. Agent trace assertion (the exclusion check actually ran) and a refusal test.
 4. Prompt-injection test — retrieved documents are untrusted input. `SECURITY.md`.
 5. FastAPI + minimal UI, three pre-loaded demo scenarios.
@@ -515,11 +586,16 @@ Per spec v2 §07–08, in this order:
 
 | Phase | New |
 |---|---|
-| 0–3 | none |
+| 0–1 | none |
+| 2 | `langsmith` — and `ragas` is dropped from the plan, its metrics covered by LangSmith |
+| 3 | none |
 | 4 | none — psycopg is already installed |
 | 5 | `sentence-transformers` (likely already present via `langchain-huggingface`) |
 | 7 | `langgraph` |
-| 8 | `fastapi`, `uvicorn`, `ragas`, `pytest` |
+| 8 | `fastapi`, `uvicorn`, `pytest` |
+
+`LANGSMITH_API_KEY` and `LANGSMITH_TRACING` join `.env` and `.env.example` at Phase 2. Tracing is
+env-var driven, so `chain.py` needs no code change to be traced.
 
 ---
 
@@ -527,7 +603,7 @@ Per spec v2 §07–08, in this order:
 
 The README table filled, every row from `evals/results/*.json`:
 
-| Configuration | recall@5 single | recall@5 multi | exclusion recall | false-answer | p95 |
+| Configuration | correctness | citation accuracy | exclusion recall | recall@5 single | recall@5 multi |
 |---|---|---|---|---|---|
 | Dense only, uniform 512 | | | | | |
 | + clause-aware chunking | | | | | |
