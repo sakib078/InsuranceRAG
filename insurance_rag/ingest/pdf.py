@@ -28,6 +28,12 @@ _MONTHS = "january|february|march|april|may|june|july|august|september|october|n
 #: FSRA covers put the issue date in a heading; a date is never a provision path.
 _DATE_RE = re.compile(rf"^\s*(?:\d{{1,2}}\s+)?(?:(?:{_MONTHS})\s+)?\d{{4}}\s*$", re.IGNORECASE)
 
+#: "2026 Auto Indexation Amounts" is a title with a year, not clause 2026.
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+
+#: Below this, a heading is too short to be safely read as a truncated document title.
+MIN_TITLE_PREFIX_CHARS = 15
+
 #: A page below this many characters is an image, not text - flag it, never index it.
 SCANNED_PAGE_CHARS = 60
 
@@ -84,11 +90,16 @@ def _cover_headings(row: ManifestRow) -> set[str]:
 
 def _is_provision(heading: str, row: ManifestRow) -> bool:
     """A provision heading is numbered or a short title - never a bullet, date, or the doc's name."""
-    if _CLAUSE_RE.match(heading):
-        return True
+    matched = _CLAUSE_RE.match(heading)
+    if matched:
+        return not _YEAR_RE.fullmatch(matched.group(1))
     if not heading or _BULLET_RE.match(heading) or _DATE_RE.match(heading):
         return False
-    if _normalise(heading) in _cover_headings(row):
+    normalised = _normalise(heading)
+    if normalised in _cover_headings(row):
+        return False
+    # A cover often prints only the head of the title, so a prefix is the same repetition.
+    if len(normalised) >= MIN_TITLE_PREFIX_CHARS and _normalise(row.title).startswith(normalised):
         return False
     stripped = heading.strip()
     return not stripped.endswith(".") and len(stripped.split()) <= MAX_HEADING_WORDS
