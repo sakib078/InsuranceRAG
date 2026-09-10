@@ -15,7 +15,7 @@ bottom of this file.
 | Storage | **One Postgres 16** — pgvector + tsvector/GIN | Chunk text, embeddings, and full-text index in one store. "One Postgres over a vector DB plus a search engine" is a real architecture answer. |
 | Ingestion | e-Laws pre-render (HTML) + PyMuPDF (PDF) | Two dialects, one chunk schema. |
 | Agent | LangGraph, exclusion check as a **graph edge** | If the model can skip the exclusion check, eventually it will. |
-| Retrieval | **Two bi-encoders; eval picks the winner** — `Qwen3-Embedding-0.6B` vs `bge-m3`, each with its own family cross-encoder | Both run locally, so no API key is needed to reproduce the table. Published scores disagree, and neither was measured on regulation text — see Deviation 8. |
+| Retrieval | **Two bi-encoders; eval picks the winner** — `Qwen3-Embedding-0.6B` vs `bge-m3`, each with its own family cross-encoder | Both run locally. Published scores disagree, and neither was measured on regulation text — see Deviation 8. **Amended in iteration 2:** the models still run locally, but the eval harness now runs on LangSmith, so reproducing the table needs a key after all. |
 | Eval order | Golden set **before** any retrieval code | Written after, it tests what you happened to build. Iteration 1 knowingly inverted this to get one end-to-end path running; iteration 2 restores it. |
 | Gold labels | Clause **locators**, resolved to chunk IDs at eval time | Survives re-chunking, the agent, and corpus growth. |
 
@@ -160,6 +160,31 @@ before-number, which is why the golden set comes first.
 | `insurance-act-part-vi` | Keep whole; do not slice |
 | Order | Golden set and harness **before** any new retrieval code |
 | Ablation | One technique per row, measured against the same frozen corpus |
+| Eval platform | **LangSmith owns the whole eval stack** — datasets, experiments, tracing, and the retrieval metrics as custom evaluators |
+| Golden set | Drafted by Claude from the chunk files, reviewed line by line by the author |
+
+### The eval-platform choice, and what it costs
+
+LangSmith ships four evaluators, all LLM-as-judge: Correctness, Relevance, Groundedness,
+Retrieval Relevance. **None of the metrics this project reports exist there** — recall@5 by hop,
+exclusion recall and revoked-leak rate are all written as custom evaluators regardless. What
+LangSmith buys is experiment comparison across the five ablation rows, tracing with p95 latency
+and cost per query, a pytest hook for the CI gate, and one fewer library than ragas.
+
+**Two claims in the README die, and both must be corrected rather than quietly left standing:**
+
+1. *"No API key is required to reproduce the numbers in the results table."* A LangSmith key is
+   now required. This is the same reasoning that rejected Cohere Rerank in Deviation 6, so
+   reversing it is a real trade, not an oversight — taken for the experiment tooling.
+2. The golden set was **drafted after retrieval failures were already known**. Spec v2 warns that
+   writing it late means unconsciously authoring questions the implementation already answers;
+   here the bias runs the other way — toward known weaknesses, which inflates the apparent gain
+   from Phases 4–5. Disclose it in the README next to the table.
+
+**One amendment to "everything in LangSmith":** `evals/golden.jsonl` stays committed in git as
+the source of truth and is pushed to LangSmith from there. A dataset that lives only in a vendor
+account is not diffable, not reviewable in a pull request, and gone if the free tier lapses.
+LangSmith runs the experiments; git holds the labels.
 
 ### Two consequences, accepted deliberately
 
@@ -374,19 +399,27 @@ non-zero on any that matches no chunk. Run before a single metric is computed.
 
 ### Exit criteria
 
-Every locator resolves. All three slices populated. Committed **before** Phase 2 code exists.
+Every locator resolves. All three slices populated. `golden.jsonl` committed **before** Phase 2
+code exists, and pushed to the LangSmith dataset from the committed file.
 
 ---
 
 ## Phase 2 — The eval harness and the baseline row
 
 ```
-evals/golden.jsonl           the set from Phase 1
-evals/validate_golden.py     locator resolver / guard
-evals/run_retrieval.py       recall@5 split by hop, exclusion recall, p95 latency
-evals/run_generation.py      false-answer rate, ragas — after retrieval is settled
-evals/results/{config}.json  one file per ablation row
+evals/golden.jsonl           the set from Phase 1 — committed, the source of truth
+evals/validate_golden.py     locator resolver / guard, offline
+evals/push_dataset.py        sync golden.jsonl -> LangSmith dataset (idempotent, by id)
+evals/evaluators.py          custom evaluators: recall@5 by hop, exclusion recall,
+                             revoked-leak; plus the LLM judges for the generation half
+evals/run_eval.py            client.evaluate(target, data=..., evaluators=[...])
 ```
+
+`gold_locators`, `exclusion_locators` and `hop` ride into the LangSmith example as custom
+fields; the evaluator reads them back off the example rather than re-deriving them.
+
+There is no `evals/results/*.json`. Experiment results live in LangSmith, one experiment per
+ablation row, named for the configuration.
 
 **Locator → chunk id resolution.** Built once from `data/chunks/*.jsonl`, reusing
 `store.read_chunks()`. A gold locator matches when `chunk.locator == gold` **or**
@@ -394,20 +427,23 @@ evals/results/{config}.json  one file per ablation row
 count as the same provision. This is what makes locator labels survive re-chunking, which is
 the whole reason they were chosen.
 
-| Metric | Definition |
-|---|---|
-| recall@5 single-hop | ≥1 gold chunk in top-5 |
-| recall@5 multi-hop | **all** gold chunks in top-5 — the number that exposes the real failure |
-| exclusion recall | ≥1 `exclusion_locators` chunk in top-5, over records where it is non-empty |
-| revoked-leak rate | share of current-law questions with a `status=REVOKED` chunk in top-5 |
-| p95 latency | from the trace log |
+| Metric | Definition | Source |
+|---|---|---|
+| recall@5 single-hop | ≥1 gold chunk in top-5 | custom evaluator |
+| recall@5 multi-hop | **all** gold chunks in top-5 — the number that exposes the real failure | custom evaluator |
+| exclusion recall | ≥1 `exclusion_locators` chunk in top-5, over records where it is non-empty | custom evaluator |
+| revoked-leak rate | share of current-law questions with a `status=REVOKED` chunk in top-5 | custom evaluator |
+| false-answer rate | an answer other than the refusal on the `answerable: false` slice | custom evaluator |
+| groundedness, answer relevance | LangSmith built-ins — replaces ragas | LangSmith |
+| p95 latency, cost per query | LangSmith tracing — replaces `data/traces.jsonl` | LangSmith |
 
-`revoked-leak rate` is beyond the spec. It exists because Phase 0 deliberately introduced the
-distractor, and an unmeasured distractor is just noise.
+The first five are pure set arithmetic over locators and need no LLM; only the last two rows use
+the hosted judges. `revoked-leak rate` is beyond the spec — it exists because Phase 0
+deliberately introduced the distractor, and an unmeasured distractor is just noise.
 
-Produces `evals/results/dense_clause_aware.json` — the current pipeline, unchanged. This is the
-before-number every later phase is measured against. Multi-hop recall is expected to be poor.
-Record it; do not fix it here.
+The first experiment records the current pipeline unchanged. This is the before-number every
+later phase is measured against. Multi-hop recall is expected to be poor. Record it; do not fix
+it here.
 
 ---
 
@@ -504,7 +540,10 @@ Per spec v2 §07–08, in this order:
 
 1. `pytest` — clause-boundary parsing, locator format, `chunk_role` classification, RRF maths.
 2. Golden-set regression test + **CI gate that fails the build when recall or exclusion recall
-   drops**. Spec: worth more than the rest of the CI config combined.
+   drops**. Spec: worth more than the rest of the CI config combined. Runs through LangSmith's
+   pytest integration, which means **CI needs `LANGSMITH_API_KEY` as a repository secret** — and
+   a fork's pull request cannot see it. Decide then whether the gate runs on forks at all, or
+   whether `validate_golden.py` (offline) is the only check a fork gets.
 3. Agent trace assertion (the exclusion check actually ran) and a refusal test.
 4. Prompt-injection test — retrieved documents are untrusted input. `SECURITY.md`.
 5. FastAPI + minimal UI, three pre-loaded demo scenarios.
@@ -515,11 +554,16 @@ Per spec v2 §07–08, in this order:
 
 | Phase | New |
 |---|---|
-| 0–3 | none |
+| 0–1 | none |
+| 2 | `langsmith` — and `ragas` is dropped from the plan, its metrics covered by LangSmith |
+| 3 | none |
 | 4 | none — psycopg is already installed |
 | 5 | `sentence-transformers` (likely already present via `langchain-huggingface`) |
 | 7 | `langgraph` |
-| 8 | `fastapi`, `uvicorn`, `ragas`, `pytest` |
+| 8 | `fastapi`, `uvicorn`, `pytest` |
+
+`LANGSMITH_API_KEY` and `LANGSMITH_TRACING` join `.env` and `.env.example` at Phase 2. Tracing is
+env-var driven, so `chain.py` needs no code change to be traced.
 
 ---
 
