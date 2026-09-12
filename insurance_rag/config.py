@@ -72,7 +72,12 @@ class Settings(BaseSettings):
     # and to keep a model family from grading its own output. These two are unprefixed in .env.
     openrouter_eval_key: str | None = Field(default=None, validation_alias="OPEN_ROUTER_EVAL_KEY")
     gemini_eval_key: str | None = Field(default=None, validation_alias="GEMINI_API_EVAL_KEY")
+    # pydantic-settings reads .env into this object, never into os.environ, so the LangSmith
+    # client has to be handed the key rather than left to find it.
+    langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
     langsmith_dataset: str = "insurance-rag-golden"
+    # An OpenRouter model id; verify it is still served at openrouter.ai/models.
+    judge_model: str = "deepseek/deepseek-chat-v3-0324:free"
 
     # --- agent ---
     max_agent_steps: int = 6

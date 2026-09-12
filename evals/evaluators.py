@@ -1,7 +1,5 @@
 """Custom evaluators: accurate retrieval and accurate citation, scored against hand labels.
 
-The scoring functions are plain and corpus-only, so the retrieval suite runs offline with no
-LLM and no key. The LangSmith adapters at the bottom are thin wrappers over them.
 """
 
 from __future__ import annotations
