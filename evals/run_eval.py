@@ -46,6 +46,8 @@ METRIC_ORDER = (
 ERROR_TOLERANCE = 0.10
 
 
+# --- targets ----------------------------------------------------------------------------------
+
 def retrieval_target(question: str, k: int) -> dict:
     """What the pipeline retrieves, in rank order. No generation, so no API call."""
     hits = search_with_scores(question, k=k)
@@ -72,11 +74,13 @@ def generation_target(question: str, k: int | None = None) -> dict:
     }
 
 
+# --- scoring ----------------------------------------------------------------------------------
+
 def labels_of(record: dict) -> dict:
     return {field: record[field] for field in LABEL_FIELDS}
 
 
-def report(totals: dict[str, list[float]], misses: list, show_misses: bool) -> dict:
+def report(totals: dict[str, list[float]], misses: list | None = None) -> dict:
     """Print the row and return the scores worth recording."""
     print(f"\n{'metric':<22}{'score':>8}{'n':>6}")
     summary = {}
@@ -85,7 +89,7 @@ def report(totals: dict[str, list[float]], misses: list, show_misses: bool) -> d
         if values:
             summary[key] = sum(values) / len(values)
             print(f"{key:<22}{summary[key]:>8.3f}{len(values):>6}")
-    if show_misses and misses:
+    if misses:
         print("\nscored 0:")
         for key, record_id, question in misses:
             print(f"  {key:<20} {record_id}  {question[:66]}")
@@ -105,7 +109,7 @@ def run_retrieval(records: list[dict], k: int, show_misses: bool) -> dict:
             totals[verdict["key"]].append(verdict["score"])
             if verdict["score"] == 0.0:
                 misses.append((verdict["key"], record["id"], record["question"]))
-    return report(totals, misses, show_misses)
+    return report(totals, misses if show_misses else None)
 
 
 def _errored(row: dict) -> bool:
@@ -113,6 +117,35 @@ def _errored(row: dict) -> bool:
     run = row.get("run")
     outputs = getattr(run, "outputs", None) or {}
     return bool(getattr(run, "error", None)) or "retrieved_locators" not in outputs
+
+
+def _tally(results) -> tuple[dict[str, list[float]], int, int]:
+    """Collect every non-null score, and count how many targets never ran."""
+    totals: dict[str, list[float]] = defaultdict(list)
+    rows = errored = 0
+    for row in results:
+        rows += 1
+        errored += _errored(row)
+        for result in row["evaluation_results"]["results"]:
+            if result.score is not None:
+                totals[result.key].append(float(result.score))
+    return totals, rows, errored
+
+
+def _guard(errored: int, rows: int) -> None:
+    """Refuse to record a run whose scores are a mean over survivors, not over the golden set."""
+    if not errored:
+        return
+    share = errored / max(rows, 1)
+    print(f"\n{errored}/{rows} records ({share:.0%}) errored: the target raised and returned "
+          f"nothing, so those records are unscored rather than zero.")
+    if share > ERROR_TOLERANCE:
+        raise SystemExit(
+            f"run DISCARDED - more than {ERROR_TOLERANCE:.0%} of the target calls failed, so "
+            "the scores above are a mean over whatever survived, not over the golden set. "
+            "Nothing was written to results/ or history.jsonl. Check the provider quota "
+            "(a daily token cap fails every call) and re-run."
+        )
 
 
 def run_generation(dataset: str, config: str, concurrency: int, pin_k: int | None) -> dict:
@@ -124,95 +157,93 @@ def run_generation(dataset: str, config: str, concurrency: int, pin_k: int | Non
     if not settings.langsmith_api_key:
         raise SystemExit("set LANGSMITH_API_KEY in .env - get one at smith.langchain.com")
 
-    client = Client(api_key=settings.langsmith_api_key)
-    results = client.evaluate(
+    results = Client(api_key=settings.langsmith_api_key).evaluate(
         lambda inputs: generation_target(inputs["question"], pin_k),
         data=dataset,
         evaluators=[*BUILT_INS, *CUSTOM_EVALUATORS],
         experiment_prefix=config,
         max_concurrency=concurrency,  # free tiers rate-limit long before they refuse
-        metadata={"config": config, "encoder": str(settings.encoder),
-                  "retrieval": f"pinned k={pin_k}" if pin_k else "ladder",
-                  "generation_model": settings.generation_model,
-                  "judge_model": settings.judge_model},
+        metadata=describe(config, pin_k),
     )
-
-    totals: dict[str, list[float]] = defaultdict(list)
-    rows = errored = 0
-    for row in results:
-        rows += 1
-        errored += _errored(row)
-        for result in row["evaluation_results"]["results"]:
-            if result.score is not None:
-                totals[result.key].append(float(result.score))
-
-    summary = report(totals, [], False)
-    if errored:
-        share = errored / max(rows, 1)
-        print(f"\n{errored}/{rows} records ({share:.0%}) errored: the target raised and returned "
-              f"nothing, so those records are unscored rather than zero.")
-        if share > ERROR_TOLERANCE:
-            raise SystemExit(
-                f"run DISCARDED - more than {ERROR_TOLERANCE:.0%} of the target calls failed, so "
-                "the scores above are a mean over whatever survived, not over the golden set. "
-                "Nothing was written to results/ or history.jsonl. Check the provider quota "
-                "(a daily token cap fails every call) and re-run."
-            )
+    totals, rows, errored = _tally(results)
+    summary = report(totals)
+    _guard(errored, rows)
     return summary
 
 
-def main() -> None:
+# --- recording --------------------------------------------------------------------------------
+
+def describe(config: str, pin_k: int | None) -> dict:
+    """What produced a generation row - the question every later comparison asks."""
+    return {
+        "config": config,
+        "encoder": str(settings.encoder),
+        "retrieval": f"pinned k={pin_k}" if pin_k else "ladder",
+        "generation": f"{settings.generation_provider}/{settings.generation_model}",
+        "judge": f"{settings.judge_provider}/{settings.judge_model}",
+    }
+
+
+def write(record: dict, config: str, suite: str) -> None:
+    """The per-config file is the row you cite; history is append-only evidence beside it."""
+    RESULTS_DIR.mkdir(exist_ok=True)
+    path = RESULTS_DIR / f"{config}_{suite}.json"
+    path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+    # Append only after a newline: without this, a file left unterminated by a hand edit gets
+    # the next record glued onto its last line, and that line stops being readable JSON.
+    history = RESULTS_DIR / HISTORY_FILE
+    unterminated = history.exists() and not history.read_text(encoding="utf-8").endswith("\n")
+    with history.open("a", encoding="utf-8") as fh:
+        fh.write(f"{'\n' if unterminated else ''}{json.dumps(record)}\n")
+
+    print(f"\nwrote {path.parent.name}/{path.name}  (+ appended to {HISTORY_FILE})")
+
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=("retrieval", "generation"), default="retrieval")
     parser.add_argument("--config", default="dense_clause_aware", help="name for this row")
     parser.add_argument("-k", type=int, default=settings.rerank_top_k)
     parser.add_argument("--dataset", default=settings.langsmith_dataset)
-    # The judge free tier is the bottleneck (Gemini 2.5 Flash: 5 req/min), not the pipeline.
+    # The judge's free tier is the bottleneck, not the pipeline.
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--pin-k", type=int, default=None,
                         help="generation: fix k and skip the retry ladder, ~40%% fewer tokens")
     parser.add_argument("--misses", action="store_true", help="list the records that scored 0")
-    args = parser.parse_args()
+    return parser.parse_args()
 
+
+def main() -> None:
+    args = parse_args()
     records = load_records(GOLDEN_PATH)
-    print(f"{args.config} [{args.suite}]: {len(records)} records", end="")
-    pinned = args.suite == "generation" and args.pin_k
-    print(f" at k={args.k}" if args.suite == "retrieval"
-          else (f" at pinned k={args.pin_k}" if pinned else " with the retry ladder on"))
+    retrieval = args.suite == "retrieval"
 
-    if args.suite == "retrieval":
+    if retrieval:
+        width = f"k={args.k}"
+    else:
+        width = f"pinned k={args.pin_k}" if args.pin_k else "the retry ladder"
+    print(f"{args.config} [{args.suite}]: {len(records)} records at {width}")
+
+    if retrieval:
         summary = run_retrieval(records, args.k, args.misses)
+        provenance = {"k": args.k, "encoder": str(settings.encoder)}
     else:
         summary = run_generation(args.dataset, args.config, args.concurrency, args.pin_k)
+        provenance = describe(args.config, args.pin_k)
 
-    record = {
-        "config": args.config,
-        "suite": args.suite,
-        "at": datetime.now(UTC).isoformat(),
-        "k": args.k if args.suite == "retrieval" else None,
-        "encoder": str(settings.encoder),
-        "generation_model": settings.generation_model if args.suite == "generation" else None,
-        "retrieval": (f"pinned k={args.pin_k}" if args.pin_k else "ladder")
-        if args.suite == "generation"
-        else None,
-        "judge": f"{settings.judge_provider}/{settings.judge_model}"
-        if args.suite == "generation"
-        else None,
-        "records": len(records),
-        "scores": summary,
-    }
-
-    RESULTS_DIR.mkdir(exist_ok=True)
-    # The per-config file is the row you cite; it is overwritten on a re-run.
-    path = RESULTS_DIR / f"{args.config}_{args.suite}.json"
-    path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-
-    # The history is append-only, so a re-run can never destroy the evidence it replaced -
-    # and two runs of one config are how judge variance becomes visible.
-    with (RESULTS_DIR / HISTORY_FILE).open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record) + "\n")
-
-    print(f"\nwrote {path.parent.name}/{path.name}  (+ appended to {HISTORY_FILE})")
+    write(
+        {
+            "config": args.config,
+            "suite": args.suite,
+            "at": datetime.now(UTC).isoformat(),
+            **provenance,
+            "records": len(records),
+            "scores": summary,
+        },
+        args.config,
+        args.suite,
+    )
 
 
 if __name__ == "__main__":

@@ -64,8 +64,7 @@ class Settings(BaseSettings):
     uniform_overlap_tokens: int = 64
 
     # --- generation (open-weight model on an OpenAI-compatible endpoint) ---
-    # See insurance_rag/providers.py. Cerebras is wired and would give 1M uncached tokens/day
-    # against Groq's 200k, but that account returns 402 - the free trial is not active.
+    # groq | ollama | gemini - see insurance_rag/providers.py.
     generation_provider: str = "groq"
     # Optional so ingestion and retrieval run without it; `chain.py` fails loudly when it is needed.
     groq_api_key: str | None = Field(default=None, description="IRAG_GROQ_API_KEY, from .env")
@@ -73,8 +72,6 @@ class Settings(BaseSettings):
 
     # --- evaluation: the judge runs off a different provider, for a separate rate limit
     # and to keep a model family from grading its own output. These keys are unprefixed in .env.
-    cerebras_api_key: str | None = Field(default=None, validation_alias="CEREBRAS_API_KEY")
-    openrouter_eval_key: str | None = Field(default=None, validation_alias="OPEN_ROUTER_EVAL_KEY")
     gemini_eval_key: str | None = Field(default=None, validation_alias="GEMINI_API_EVAL_KEY")
     # pydantic-settings reads .env into this object, never into os.environ, so the LangSmith
     # client has to be handed the key rather than left to find it.
