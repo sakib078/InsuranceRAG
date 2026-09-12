@@ -13,7 +13,7 @@ from collections import Counter
 from pathlib import Path
 
 from insurance_rag.config import DATA_DIR
-from insurance_rag.corpus.manifest import Status, by_doc_id, load_manifest
+from insurance_rag.corpus.manifest import Status, load_manifest
 
 GOLDEN_PATH = Path(__file__).resolve().parent / "golden.jsonl"
 CHUNKS_DIR = DATA_DIR / "chunks"
@@ -50,7 +50,12 @@ def resolve(gold: str, locators: dict[str, list[str]]) -> list[str]:
     return hits
 
 
-def check(records: list[dict], locators, owners, revoked: set[str]) -> list[str]:
+def check(
+    records: list[dict],
+    locators: dict[str, list[str]],
+    owners: dict[str, str],
+    revoked: set[str],
+) -> list[str]:
     """Every structural rule the harness later assumes; returns human-readable failures."""
     problems: list[str] = []
     seen: set[str] = set()
@@ -105,7 +110,7 @@ def main() -> None:
 
     records = load_records(args.path)
     locators, owners = chunk_index()
-    revoked = {r.doc_id for r in load_manifest().__iter__() if r.status is Status.REVOKED}
+    revoked = {r.doc_id for r in load_manifest() if r.status is Status.REVOKED}
     problems = check(records, locators, owners, revoked)
 
     slices = Counter(r.get("hop") for r in records)

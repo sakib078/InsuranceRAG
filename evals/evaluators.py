@@ -1,6 +1,4 @@
-"""Custom evaluators: accurate retrieval and accurate citation, scored against hand labels.
-
-"""
+"""Custom evaluators: accurate retrieval and accurate citation, scored against hand labels."""
 
 from __future__ import annotations
 
@@ -43,7 +41,7 @@ def _corpus() -> tuple[dict[str, str], frozenset[str]]:
     return owners, revoked
 
 
-# scoring 
+# --- scoring
 
 def recall(
     retrieved: Sequence[str],
@@ -90,48 +88,62 @@ def citation_accuracy(
     return sum(1 for g in gold if _found(g, cited)) / len(gold)
 
 
-# --- LangSmith adapters ----------------------------------------------------------------------
-#
-# `outputs` is what the target returned; `reference_outputs` carries the golden-set labels.
-# Returning None makes LangSmith skip the record rather than score it zero.
+# The LangSmith adapters return a result object with `score: None` for records that were not applicable or did not complete. 
+# This excludes them from averages while avoiding errors caused by returning a bare `None`.
 
 def _labels(reference_outputs: dict) -> dict:
     return reference_outputs or {}
 
 
-def recall_single(outputs: dict, reference_outputs: dict) -> dict | None:
-    labels = _labels(reference_outputs)
-    if labels.get("hop") != "single":
-        return None
-    score = recall(outputs.get("retrieved_locators", []), labels.get("gold_locators", []))
-    return None if score is None else {"key": "recall@5_single", "score": score}
+def _skip(key: str) -> dict:
+    """Not applicable to this record: no score, and no effect on the mean."""
+    return {"key": key, "score": None}
 
 
-def recall_multi(outputs: dict, reference_outputs: dict) -> dict | None:
+def _ran(outputs: dict, *keys: str) -> bool:
+    """Did the target finish? It writes its whole dict at once, so a missing key means it raised.
+
+    Presence, not truthiness: `retrieved_locators == []` is a real (bad) retrieval, while an
+    absent key can only mean the dict was never built - scoring that is inventing a measurement.
+    """
+    return bool(outputs) and all(key in outputs for key in keys)
+
+
+def recall_single(outputs: dict, reference_outputs: dict) -> dict:
     labels = _labels(reference_outputs)
-    if labels.get("hop") != "multi":
-        return None
+    if labels.get("hop") != "single" or not _ran(outputs, "retrieved_locators"):
+        return _skip("recall@5_single")
+    score = recall(outputs["retrieved_locators"], labels.get("gold_locators", []))
+    return {"key": "recall@5_single", "score": score}
+
+
+def recall_multi(outputs: dict, reference_outputs: dict) -> dict:
+    labels = _labels(reference_outputs)
+    if labels.get("hop") != "multi" or not _ran(outputs, "retrieved_locators"):
+        return _skip("recall@5_multi")
     score = recall(
-        outputs.get("retrieved_locators", []), labels.get("gold_locators", []), require_all=True
+        outputs["retrieved_locators"], labels.get("gold_locators", []), require_all=True
     )
-    return None if score is None else {"key": "recall@5_multi", "score": score}
+    return {"key": "recall@5_multi", "score": score}
 
 
-def exclusion_recall_eval(outputs: dict, reference_outputs: dict) -> dict | None:
+def exclusion_recall_eval(outputs: dict, reference_outputs: dict) -> dict:
     labels = _labels(reference_outputs)
-    score = exclusion_recall(
-        outputs.get("retrieved_locators", []), labels.get("exclusion_locators", [])
-    )
-    return None if score is None else {"key": "exclusion_recall", "score": score}
+    if not _ran(outputs, "retrieved_locators"):
+        return _skip("exclusion_recall")
+    score = exclusion_recall(outputs["retrieved_locators"], labels.get("exclusion_locators", []))
+    return {"key": "exclusion_recall", "score": score}
 
 
 def citation_accuracy_eval(outputs: dict, reference_outputs: dict) -> dict:
     labels = _labels(reference_outputs)
+    if not _ran(outputs, "cited_locators", "retrieved_locators"):
+        return _skip("citation_accuracy")
     return {
         "key": "citation_accuracy",
         "score": citation_accuracy(
-            outputs.get("cited_locators", []),
-            outputs.get("retrieved_locators", []),
+            outputs["cited_locators"],
+            outputs["retrieved_locators"],
             labels.get("gold_locators", []),
         ),
     }

@@ -29,6 +29,8 @@ Explain your reasoning in a step-by-step manner to ensure your reasoning and con
 
 def groundedness(inputs: dict, outputs: dict) -> dict:
     """A simple evaluator for RAG answer groundedness."""
+    if not outputs.get("answer"):
+        return {"key": "groundedness", "score": None}  # the target failed; nothing to judge
     answer = f"FACTS: {facts(outputs)}\nSTUDENT ANSWER: {outputs['answer']}"
     verdict = grade(GroundedGrade, grounded_instructions, answer)
     return score("groundedness", verdict["grounded"])

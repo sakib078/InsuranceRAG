@@ -17,11 +17,10 @@ __all__ = ["embeddings", "vector_store", "add_chunks", "read_chunks", "to_chunk"
 #: Tuple fields survive JSONB as lists and have to be cast back on the way out.
 _TUPLE_FIELDS = ("ancestor_path", "defined_terms")
 
+
 def connection_string() -> str:
-    """`settings.postgres_dsn` with the psycopg3 driver spelled out."""
-    dsn = settings.postgres_dsn
-    
-    return dsn
+    """The DSN PGVector connects on; `.env` already spells out the psycopg3 driver."""
+    return settings.postgres_dsn
 
 
 @lru_cache(maxsize=1)

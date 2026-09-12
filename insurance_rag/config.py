@@ -63,23 +63,28 @@ class Settings(BaseSettings):
     uniform_chunk_tokens: int = 512  # baseline row only
     uniform_overlap_tokens: int = 64
 
-    # --- generation (open-weight model, served by Groq) ---
+    # --- generation (open-weight model on an OpenAI-compatible endpoint) ---
+    # See insurance_rag/providers.py. Cerebras is wired and would give 1M uncached tokens/day
+    # against Groq's 200k, but that account returns 402 - the free trial is not active.
+    generation_provider: str = "groq"
     # Optional so ingestion and retrieval run without it; `chain.py` fails loudly when it is needed.
     groq_api_key: str | None = Field(default=None, description="IRAG_GROQ_API_KEY, from .env")
-    generation_model: str = "openai/gpt-oss-120b"
+    generation_model: str = "openai/gpt-oss-120b"  # Cerebras spells this "gpt-oss-120b"
 
     # --- evaluation: the judge runs off a different provider, for a separate rate limit
-    # and to keep a model family from grading its own output. These two are unprefixed in .env.
+    # and to keep a model family from grading its own output. These keys are unprefixed in .env.
+    cerebras_api_key: str | None = Field(default=None, validation_alias="CEREBRAS_API_KEY")
     openrouter_eval_key: str | None = Field(default=None, validation_alias="OPEN_ROUTER_EVAL_KEY")
     gemini_eval_key: str | None = Field(default=None, validation_alias="GEMINI_API_EVAL_KEY")
     # pydantic-settings reads .env into this object, never into os.environ, so the LangSmith
     # client has to be handed the key rather than left to find it.
     langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
     langsmith_dataset: str = "insurance-rag-golden"
-    # gemini | openrouter. Both are reached over their OpenAI-compatible endpoints, so
-    # neither needs a provider SDK; `judge_model` must match whichever is selected.
-    judge_provider: str = "gemini"
-    judge_model: str = "gemini-2.5-flash"
+    # See insurance_rag/providers.py for the options. A different provider from the generator
+    # means a separate budget; a different family means it cannot favour its own phrasing.
+    judge_provider: str = "groq"
+    judge_model: str = "qwen/qwen3.8-27b"  # Cerebras spells this "qwen-3.8-27b"
+    ollama_api_key: str = "ollama"  # Ollama ignores it; the OpenAI client requires one
 
     # --- agent ---
     max_agent_steps: int = 6

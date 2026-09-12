@@ -1,0 +1,16 @@
+{
+  "config": "dense_clause_aware",
+  "suite": "generation",
+  "at": "2026-09-12T19:21:54.636569+00:00",
+  "k": null,
+  "encoder": "qwen3",
+  "generation_model": "openai/gpt-oss-120b",
+  "judge": "groq/qwen/qwen3.8-27b",
+  "records": 56,
+  "scores": {
+    "citation_accuracy": 0.2857142857142857,
+    "correctness": 0.7169811320754716,
+    "groundedness": 0.7924528301886793
+  },
+  "note": "RESTORED from history.jsonl - the 2026-09-12T19:59:51Z run that overwrote this file was discarded (see its `invalid` field there). This is the last generation run whose target actually answered; it predates the custom retrieval evaluators, hence only three scores."
+}

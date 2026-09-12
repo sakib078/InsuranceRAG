@@ -33,7 +33,8 @@ def report(doc_id: str, chunks: list[Chunk]) -> None:
     tokens = sorted(c.token_count for c in chunks)
     roles = Counter(c.chunk_role.value for c in chunks)
     median = tokens[len(tokens) // 2] if tokens else 0
-    print(f"{doc_id:34} {len(chunks):5} chunks  median {median:4} max {tokens[-1] if tokens else 0:4}")
+    largest = tokens[-1] if tokens else 0
+    print(f"{doc_id:34} {len(chunks):5} chunks  median {median:4} max {largest:4}")
     print(f"{'':34} {dict(roles)}")
 
 

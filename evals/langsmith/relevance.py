@@ -28,6 +28,8 @@ Explain your reasoning in a step-by-step manner to ensure your reasoning and con
 
 def relevance(inputs: dict, outputs: dict) -> dict:
     """A simple evaluator for RAG answer helpfulness."""
+    if not outputs.get("answer"):
+        return {"key": "relevance", "score": None}  # the target failed; nothing to judge
     answer = f"QUESTION: {inputs['question']}\nSTUDENT ANSWER: {outputs['answer']}"
     verdict = grade(RelevanceGrade, relevance_instructions, answer)
     return score("relevance", verdict["relevant"])

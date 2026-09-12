@@ -31,6 +31,8 @@ Explain your reasoning in a step-by-step manner to ensure your reasoning and con
 
 def retrieval_relevance(inputs: dict, outputs: dict) -> dict:
     """An evaluator for document relevance"""
+    if not outputs.get("retrieved_text"):
+        return {"key": "retrieval_relevance", "score": None}  # the target failed
     answer = f"FACTS: {facts(outputs)}\nQUESTION: {inputs['question']}"
     verdict = grade(RetrievalRelevanceGrade, retrieval_relevance_instructions, answer)
     return score("retrieval_relevance", verdict["relevant"])
