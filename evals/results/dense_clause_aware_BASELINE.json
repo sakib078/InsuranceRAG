@@ -1,0 +1,26 @@
+{
+  "config": "dense_clause_aware",
+  "at": "2026-09-12T00:29:59.188514+00:00",
+  "k": 5,
+  "encoder": "qwen3",
+  "records": 56,
+  "scores": {
+    "recall@5_single": 0.7368421052631579,
+    "recall@5_multi": 0.05,
+    "exclusion_recall": 0.45
+  },
+  "counts": {
+    "recall@5_single": 19,
+    "exclusion_recall": 20,
+    "recall@5_multi": 20
+  },
+  "note": "BASELINE - do not overwrite. Bi-encoder only: Qwen3-Embedding-0.6B, pgvector cosine, k pinned at 5. No sparse channel, no RRF, no cross-encoder rerank. chain.LADDER is NOT active here - the retry ladder is a generation behaviour and the retrieval suite never calls the model, so these are honest k=5 numbers. Corpus: 3,897 chunks over 20 documents including the two revoked SABS as deliberate distractors.",
+  "diagnostic": {
+    "comment": "Where the 79 gold locators rank within the top 50 - this is what splits the fix.",
+    "top_5": 36,
+    "rank_6_to_20": 21,
+    "rank_21_to_50": 7,
+    "absent_from_top_50": 15,
+    "reading": "28 of 43 failures (65%) are ranking failures, not recall failures - a cross-encoder over the top 20-50 reaches all of them (Phase 5). The 15 absent are numbered subsections of the Insurance Act and OAP 1 that dense retrieval never surfaces; only sparse + fusion can reach those (Phase 4)."
+  }
+}

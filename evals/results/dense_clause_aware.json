@@ -1,0 +1,17 @@
+{
+  "config": "dense_clause_aware",
+  "at": "2026-09-12T00:29:59.188514+00:00",
+  "k": 5,
+  "encoder": "qwen3",
+  "records": 56,
+  "scores": {
+    "recall@5_single": 0.7368421052631579,
+    "recall@5_multi": 0.05,
+    "exclusion_recall": 0.45
+  },
+  "counts": {
+    "recall@5_single": 19,
+    "exclusion_recall": 20,
+    "recall@5_multi": 20
+  }
+}

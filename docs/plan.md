@@ -311,26 +311,156 @@ All four are LLM-as-judge. Correctness is the one the golden set's `answer` fiel
 ### Custom evaluators — only what the product is judged on
 
 What matters for this application is an **accurate answer** carrying an **accurate citation**.
-Nothing else earns a column.
+Nothing else earns a column. Each evaluator asks one question about one record and scores it;
+the experiment averages. `evals/evaluators.py`.
 
-| Evaluator | Definition | Why it cannot be a built-in |
-|---|---|---|
-| **Citation accuracy** | every locator the answer cites resolves to a real chunk, was in the retrieved set, and is not from a `status=REVOKED` document; and the gold locators are among those cited | No generic evaluator knows what a locator is, or which documents are revoked. This is the product's core promise measured directly |
-| **Exclusion recall** | ≥1 `exclusion_locators` chunk in top-5, over records where that field is non-empty | Domain-specific, and it must read the **hand-written** label — computing it from `chunk_role` would measure the classifier, which is wrong on exactly the provisions that matter (`s. 6(2)`) |
-| **recall@5, split single / multi** | single: ≥1 gold chunk in top-5. multi: **all** gold chunks in top-5 | Ground truth beats LLM judgment where ground truth exists — this is the stricter sibling of Retrieval relevance, and it is what the ablation table is built on |
+**1. recall@5 single — was the right clause in the top 5?**
+For questions answered by a single provision.
+
+```
+"is there a waiting period before IRB starts paying?"   gold: s. 6(2)
+top-5:  s. 6(1)  s. 5(1)  s. 6(2)  s. 7(1)  s. 12(1)      -> 1
+                          ^ found
+```
+
+At rank 6 it scores 0, even though the system would find it eventually. The model only sees 5.
+
+**2. recall@5 multi — were *all* the right clauses in the top 5?**
+Every gold locator must be present; one missing scores 0.
+
+```
+"is physiotherapy covered after a minor injury?"   gold: s. 18(1) + s. 40(1) + MIG s. 1
+top-5:  s. 40(1)  s. 3(1)  s. 40(6)  MIG s. 1  s. 41(1)   -> 0   (s. 18(1) absent)
+```
+
+Harsh on purpose. An answer built from two of three controlling provisions is incomplete, and
+this is the column that exposes it — the one the Phase 7 agent exists to move.
+
+**3. Exclusion recall — did the limit surface, not just the grant?**
+Runs only on records with a non-empty `exclusion_locators`; the rest are **skipped, not zeroed**.
+
+```
+"I was drunk when I crashed - can I claim benefits?"
+grant s. 14 retrieved, exclusion s. 31(1) not retrieved    -> 0
+```
+
+The safety metric. Retrieving the grant and missing the exclusion produces a confident
+*"yes, you're covered"* — the most expensive way to be wrong in this domain.
+
+**4. Citation accuracy — are the citations real, and complete?**
+The only one that reads what the model *wrote* rather than what retrieval *found*. Three instant
+zeros: a locator that exists nowhere in the corpus (invented), a locator that was never in the
+top-5 (recalled from training, not from the documents), or a chunk from the **revoked** SABS
+quoted as current law. Otherwise the score is the share of gold locators actually cited —
+`cited s. 18(1)` against gold `s. 18(1) + MIG s. 1` scores 0.5, correct but half-sourced. On the
+17 unanswerable records the right behaviour is to cite nothing: citing nothing scores 1.
+
+| Evaluator | Why it cannot be a built-in |
+|---|---|
+| Citation accuracy | No generic evaluator knows what a locator is, or which documents are revoked. This is the product's core promise measured directly |
+| Exclusion recall | Domain-specific, and it must read the **hand-written** label — computing it from `chunk_role` would measure the classifier, which is wrong on exactly the provisions that matter (`s. 6(2)`) |
+| recall@5 single / multi | Ground truth beats LLM judgment where ground truth exists. The stricter sibling of Retrieval relevance, and what the ablation table is built on |
 
 Pure set arithmetic over locators. No LLM, no cost, no key — so they stay reproducible offline
 even though the experiments run hosted.
 
-**One conflict to settle:** spec v2's Definition of Done requires "recall@5 reported separately
-for single-hop and multi-hop, with the uniform-chunker baseline visible." That is why recall@5
-survives the cut above despite not being answer-shaped — it is the only metric that isolates
-*where* a regression happened. Drop it and a fall in Correctness cannot be attributed to
-retrieval or to generation.
+**Two implementation rules that are easy to get wrong.** A gold label matches its ` #2`
+sub-chunks, so labels survive re-chunking — the corpus has been re-ingested three times without
+a single label breaking. And an off-slice evaluator returns `None` rather than `0`, so LangSmith
+skips the record: recall@5 single is averaged over 19 records, not 56.
 
-The first experiment records the current pipeline unchanged. This is the before-number every
-later phase is measured against. Multi-hop recall is expected to be poor. Record it; do not fix
-it here.
+<details>
+<summary><b>Build plan — click to expand</b></summary>
+
+### Two experiment types, not one
+
+The seven evaluators need different inputs and cost wildly different amounts, so they run as two
+suites rather than one.
+
+| Suite | Evaluators | LLM calls per run | Run it for |
+|---|---|---|---|
+| **retrieval** | recall@5 single, recall@5 multi, exclusion recall | **0** | every ablation row |
+| **generation** | Correctness, Relevance, Groundedness, Retrieval relevance, citation accuracy | ~56 generations + ~224 judge calls | only rows where generation changed |
+
+Phases 3–5 change retrieval alone. Judging those with four LLMs is ~1,100 calls to measure
+something that cannot have moved. The retrieval suite is set arithmetic over locators — free,
+instant, no key — so it runs on everything, and the retrieval columns of the ablation table stay
+ground-truth-scored rather than LLM-opinion-scored.
+
+### The target function's output contract
+
+Everything else depends on this shape, because every evaluator reads from it.
+
+```python
+{
+  "answer":             str,        # Correctness, Relevance, Groundedness
+  "retrieved_locators": list[str],  # rank order - recall@5, exclusion recall
+  "retrieved_text":     list[str],  # Groundedness, Retrieval relevance
+  "cited_locators":     list[str],  # citation accuracy
+}
+```
+
+The retrieval target returns only the `retrieved_*` fields and never calls an LLM.
+
+**This requires one change to `chain.py`:** `Answer.chunks` has already been filtered by `cited()`
+to what the answer referenced, so the *retrieved* set is discarded before it returns. `Answer`
+gains a `retrieved` field alongside `chunks` — citation accuracy needs both (was every cited
+locator actually retrieved?) and recall@5 needs the full ranked list.
+
+### Files
+
+```
+evals/push_dataset.py   golden.jsonl -> LangSmith dataset, idempotent by record id
+evals/evaluators.py     recall_single, recall_multi, exclusion_recall, citation_accuracy
+evals/run_eval.py       --suite retrieval|generation  --config <ablation row name>
+```
+
+Plus `LANGSMITH_API_KEY` and `LANGSMITH_TRACING` into `.env` / `.env.example`, and the README's
+no-API-key claim corrected.
+
+**Citation accuracy** carries the only real logic. Four ways an answer cites badly:
+
+1. cites a locator resolving to no chunk — fabricated
+2. cites a locator that was never retrieved — fabricated differently
+3. cites a `status=REVOKED` chunk as current law
+4. fails to cite a gold locator it was given
+
+1–3 score as hard failures, 4 as the recall half; reported as one number.
+
+### Settled
+
+**Judge model — a different provider and a different family from the generator.** The generator
+is `openai/gpt-oss-120b` on Groq. A model judging its own family's output has an obvious
+self-preference problem, and a judge on the same provider shares the same rate-limit bucket —
+so a second provider fixes both at once. Groq's own `qwen/qwen3.8-27b` is the fallback if only
+one key is wanted; it fixes the family problem but not the bucket.
+
+**Rate limits.**
+
+- `max_concurrency` held low (2–4) rather than letting LangSmith fan out.
+- Exponential backoff on HTTP 429, with jitter.
+- **`evaluate_existing` over `evaluate`** wherever the target has already run. Adding or swapping
+  a judge then re-scores stored outputs instead of regenerating 56 answers — which is what makes
+  iterating on the judges affordable.
+- The retrieval suite is unaffected; it makes no calls at all.
+
+**The retry ladder stays on for generation, and is pinned off for retrieval.** `chain.LADDER`
+escalates k on a refusal, so "recall@5" measured through it would not be at k=5. Retrieval
+experiments pin `k=5` to measure the stated metric honestly; generation experiments leave the
+ladder on to measure the product as shipped. Two different questions, deliberately two settings.
+
+### Order
+
+1. `Answer` gains `retrieved`.
+2. `evaluators.py` — the three custom retrieval evaluators, with unit tests over known cases.
+3. `push_dataset.py`; verify 56 examples land with their metadata intact.
+4. `run_eval.py --suite retrieval --config dense_clause_aware` — **the baseline row**.
+5. Wire the built-ins, add citation accuracy, run the generation suite.
+
+Steps 1–4 are built to run offline as well as through `client.evaluate()`, so the baseline exists
+even if the key or the free tier becomes a problem.
+
+</details>
 
 ---
 

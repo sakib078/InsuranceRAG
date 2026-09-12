@@ -35,11 +35,12 @@ Question: {question}"""
 
 @dataclass(frozen=True)
 class Answer:
-    """The model's text plus the exact chunks it was shown, so citations cannot drift."""
+    """The model's text, the chunks it cited, and the full set it was shown."""
 
     question: str
     text: str
-    chunks: list[Chunk]
+    chunks: list[Chunk]     # cited - what ask.py renders as sources
+    retrieved: list[Chunk]  # everything the model saw - recall and citation metrics read this
 
 
 def format_context(chunks: list[Chunk]) -> str:
@@ -80,12 +81,15 @@ def cited(text: str, chunks: list[Chunk]) -> list[Chunk]:
 
 def answer(question: str, *, k: int | None = None) -> Answer:
     """Retry a refusal at a wider k; refuse for real only once the ladder is exhausted."""
+    retrieved: list[Chunk] = []
     for width in (k,) if k else LADDER:
-        chunks = search_corpus(question, k=width)
-        if not chunks:
+        retrieved = search_corpus(question, k=width)
+        if not retrieved:
             break
-        text = _chain().invoke({"context": format_context(chunks), "question": question}).strip()
+        text = _chain().invoke(
+            {"context": format_context(retrieved), "question": question}
+        ).strip()
         if REFUSAL not in text:
             # A cited-nothing answer is a prompt failure, not a reason to drop the provenance.
-            return Answer(question, text, cited(text, chunks) or chunks)
-    return Answer(question, REFUSAL, [])
+            return Answer(question, text, cited(text, retrieved) or retrieved, retrieved)
+    return Answer(question, REFUSAL, [], retrieved)
