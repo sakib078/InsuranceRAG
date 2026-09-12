@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     groq_api_key: str | None = Field(default=None, description="IRAG_GROQ_API_KEY, from .env")
     generation_model: str = "openai/gpt-oss-120b"
 
+    # --- evaluation: the judge runs off a different provider, for a separate rate limit
+    # and to keep a model family from grading its own output. These two are unprefixed in .env.
+    openrouter_eval_key: str | None = Field(default=None, validation_alias="OPEN_ROUTER_EVAL_KEY")
+    gemini_eval_key: str | None = Field(default=None, validation_alias="GEMINI_API_EVAL_KEY")
+    langsmith_dataset: str = "insurance-rag-golden"
+
     # --- agent ---
     max_agent_steps: int = 6
     enable_web_fallback: bool = False  # must stay false for every eval run

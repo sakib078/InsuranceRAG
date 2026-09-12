@@ -332,6 +332,99 @@ The first experiment records the current pipeline unchanged. This is the before-
 later phase is measured against. Multi-hop recall is expected to be poor. Record it; do not fix
 it here.
 
+<details>
+<summary><b>Build plan — click to expand</b></summary>
+
+### Two experiment types, not one
+
+The seven evaluators need different inputs and cost wildly different amounts, so they run as two
+suites rather than one.
+
+| Suite | Evaluators | LLM calls per run | Run it for |
+|---|---|---|---|
+| **retrieval** | recall@5 single, recall@5 multi, exclusion recall | **0** | every ablation row |
+| **generation** | Correctness, Relevance, Groundedness, Retrieval relevance, citation accuracy | ~56 generations + ~224 judge calls | only rows where generation changed |
+
+Phases 3–5 change retrieval alone. Judging those with four LLMs is ~1,100 calls to measure
+something that cannot have moved. The retrieval suite is set arithmetic over locators — free,
+instant, no key — so it runs on everything, and the retrieval columns of the ablation table stay
+ground-truth-scored rather than LLM-opinion-scored.
+
+### The target function's output contract
+
+Everything else depends on this shape, because every evaluator reads from it.
+
+```python
+{
+  "answer":             str,        # Correctness, Relevance, Groundedness
+  "retrieved_locators": list[str],  # rank order - recall@5, exclusion recall
+  "retrieved_text":     list[str],  # Groundedness, Retrieval relevance
+  "cited_locators":     list[str],  # citation accuracy
+}
+```
+
+The retrieval target returns only the `retrieved_*` fields and never calls an LLM.
+
+**This requires one change to `chain.py`:** `Answer.chunks` has already been filtered by `cited()`
+to what the answer referenced, so the *retrieved* set is discarded before it returns. `Answer`
+gains a `retrieved` field alongside `chunks` — citation accuracy needs both (was every cited
+locator actually retrieved?) and recall@5 needs the full ranked list.
+
+### Files
+
+```
+evals/push_dataset.py   golden.jsonl -> LangSmith dataset, idempotent by record id
+evals/evaluators.py     recall_single, recall_multi, exclusion_recall, citation_accuracy
+evals/run_eval.py       --suite retrieval|generation  --config <ablation row name>
+```
+
+Plus `LANGSMITH_API_KEY` and `LANGSMITH_TRACING` into `.env` / `.env.example`, and the README's
+no-API-key claim corrected.
+
+**Citation accuracy** carries the only real logic. Four ways an answer cites badly:
+
+1. cites a locator resolving to no chunk — fabricated
+2. cites a locator that was never retrieved — fabricated differently
+3. cites a `status=REVOKED` chunk as current law
+4. fails to cite a gold locator it was given
+
+1–3 score as hard failures, 4 as the recall half; reported as one number.
+
+### Settled
+
+**Judge model — a different provider and a different family from the generator.** The generator
+is `openai/gpt-oss-120b` on Groq. A model judging its own family's output has an obvious
+self-preference problem, and a judge on the same provider shares the same rate-limit bucket —
+so a second provider fixes both at once. Groq's own `qwen/qwen3.8-27b` is the fallback if only
+one key is wanted; it fixes the family problem but not the bucket.
+
+**Rate limits.**
+
+- `max_concurrency` held low (2–4) rather than letting LangSmith fan out.
+- Exponential backoff on HTTP 429, with jitter.
+- **`evaluate_existing` over `evaluate`** wherever the target has already run. Adding or swapping
+  a judge then re-scores stored outputs instead of regenerating 56 answers — which is what makes
+  iterating on the judges affordable.
+- The retrieval suite is unaffected; it makes no calls at all.
+
+**The retry ladder stays on for generation, and is pinned off for retrieval.** `chain.LADDER`
+escalates k on a refusal, so "recall@5" measured through it would not be at k=5. Retrieval
+experiments pin `k=5` to measure the stated metric honestly; generation experiments leave the
+ladder on to measure the product as shipped. Two different questions, deliberately two settings.
+
+### Order
+
+1. `Answer` gains `retrieved`.
+2. `evaluators.py` — the three custom retrieval evaluators, with unit tests over known cases.
+3. `push_dataset.py`; verify 56 examples land with their metadata intact.
+4. `run_eval.py --suite retrieval --config dense_clause_aware` — **the baseline row**.
+5. Wire the built-ins, add citation accuracy, run the generation suite.
+
+Steps 1–4 are built to run offline as well as through `client.evaluate()`, so the baseline exists
+even if the key or the free tier becomes a problem.
+
+</details>
+
 ---
 
 ## Phase 3 — The uniform-512 baseline row
