@@ -31,6 +31,8 @@ Explain your reasoning in a step-by-step manner to ensure your reasoning and con
 
 def correctness(inputs: dict, outputs: dict, reference_outputs: dict) -> dict:
     """An evaluator for RAG answer accuracy"""
+    if not outputs.get("answer"):
+        return {"key": "correctness", "score": None}  # the target failed; nothing to judge
     answers = f"""\
 QUESTION: {inputs['question']}
 GROUND TRUTH ANSWER: {reference_outputs['answer']}

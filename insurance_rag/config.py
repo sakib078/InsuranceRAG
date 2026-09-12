@@ -76,10 +76,13 @@ class Settings(BaseSettings):
     # client has to be handed the key rather than left to find it.
     langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
     langsmith_dataset: str = "insurance-rag-golden"
-    # gemini | openrouter. Both are reached over their OpenAI-compatible endpoints, so
-    # neither needs a provider SDK; `judge_model` must match whichever is selected.
-    judge_provider: str = "gemini"
-    judge_model: str = "gemini-2.5-flash"
+    # groq | gemini | openrouter | ollama. All are reached over OpenAI-compatible endpoints,
+    # so none needs a provider SDK; `judge_model` must match whichever is selected.
+    # Groq's quotas are per-model: judging on Qwen leaves the generator's budget untouched,
+    # and a different family cannot favour its own phrasing.
+    judge_provider: str = "groq"
+    judge_model: str = "qwen/qwen3.8-27b"
+    ollama_api_key: str = "ollama"  # Ollama ignores it; the OpenAI client requires one
 
     # --- agent ---
     max_agent_steps: int = 6

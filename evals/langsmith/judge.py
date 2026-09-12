@@ -7,15 +7,24 @@ phrasing. Both providers below expose OpenAI-compatible endpoints, so neither ne
 
 from __future__ import annotations
 
-import random
-import re
-import time
 from functools import lru_cache
 
 from insurance_rag.config import settings
+from insurance_rag.ratelimit import with_retry
 
-#: provider -> (base_url, which settings field holds the key, where to get one)
+#: provider -> (base_url, which settings field holds the key, where to get one).
+#: Groq quotas are per-model, so judging on Qwen never touches the generator's budget.
 PROVIDERS = {
+    "groq": (
+        "https://api.groq.com/openai/v1",
+        "groq_api_key",
+        "console.groq.com/keys",
+    ),
+    "ollama": (
+        "http://localhost:11434/v1",
+        "ollama_api_key",
+        "a local container - smoke tests only, never a recorded row",
+    ),
     "gemini": (
         "https://generativelanguage.googleapis.com/v1beta/openai/",
         "gemini_eval_key",
@@ -56,38 +65,11 @@ def facts(outputs: dict) -> str:
     return "\n\n".join(outputs.get("retrieved_text", []))
 
 
-#: Free judge tiers are tight - Gemini 2.5 Flash allows 5 requests a minute - and a generation
-#: run is 56 records x 4 judges, so a rate limit is the expected path rather than an error.
-MAX_ATTEMPTS = 6
-MAX_BACKOFF = 90.0
-
-_RETRY_AFTER_RE = re.compile(r"retry in ([\d.]+)s|retryDelay['\"]?:\s*['\"]?(\d+)s")
-
-
-def _wait_for(exc: Exception, attempt: int) -> float:
-    """Honour the provider's own retry hint when it gives one; otherwise back off and jitter."""
-    match = _RETRY_AFTER_RE.search(str(exc))
-    if match:
-        hinted = float(match.group(1) or match.group(2))
-        return min(hinted + 1.0, MAX_BACKOFF)
-    return min(2.0**attempt + random.uniform(0, 1), MAX_BACKOFF)
-
-
-def _is_rate_limit(exc: Exception) -> bool:
-    return "429" in str(exc) or "rate" in type(exc).__name__.lower()
-
-
 def grade(schema: type, instructions: str, message: str) -> dict:
     """One judge call, retried through rate limits. Concurrency is owned by run_eval."""
-    messages = [{"role": "system", "content": instructions}, {"role": "user", "content": message}]
-    for attempt in range(MAX_ATTEMPTS):
-        try:
-            return grader(schema).invoke(messages)
-        except Exception as exc:
-            if not _is_rate_limit(exc) or attempt == MAX_ATTEMPTS - 1:
-                raise
-            time.sleep(_wait_for(exc, attempt))
-    raise RuntimeError("unreachable")
+    messages = [{"role": "system", "content": instructions},
+                {"role": "user", "content": message}]
+    return with_retry(lambda: grader(schema).invoke(messages))
 
 
 def score(key: str, value: bool | None) -> dict:

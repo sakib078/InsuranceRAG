@@ -93,36 +93,42 @@ def citation_accuracy(
 # --- LangSmith adapters ----------------------------------------------------------------------
 #
 # `outputs` is what the target returned; `reference_outputs` carries the golden-set labels.
-# Returning None makes LangSmith skip the record rather than score it zero.
+# An off-slice record scores `None`, which LangSmith leaves out of the average - returning a
+# bare None instead raises, because it expects a result object.
 
 def _labels(reference_outputs: dict) -> dict:
     return reference_outputs or {}
 
 
-def recall_single(outputs: dict, reference_outputs: dict) -> dict | None:
+def _skip(key: str) -> dict:
+    """Not applicable to this record: no score, and no effect on the mean."""
+    return {"key": key, "score": None}
+
+
+def recall_single(outputs: dict, reference_outputs: dict) -> dict:
     labels = _labels(reference_outputs)
     if labels.get("hop") != "single":
-        return None
+        return _skip("recall@5_single")
     score = recall(outputs.get("retrieved_locators", []), labels.get("gold_locators", []))
-    return None if score is None else {"key": "recall@5_single", "score": score}
+    return {"key": "recall@5_single", "score": score}
 
 
-def recall_multi(outputs: dict, reference_outputs: dict) -> dict | None:
+def recall_multi(outputs: dict, reference_outputs: dict) -> dict:
     labels = _labels(reference_outputs)
     if labels.get("hop") != "multi":
-        return None
+        return _skip("recall@5_multi")
     score = recall(
         outputs.get("retrieved_locators", []), labels.get("gold_locators", []), require_all=True
     )
-    return None if score is None else {"key": "recall@5_multi", "score": score}
+    return {"key": "recall@5_multi", "score": score}
 
 
-def exclusion_recall_eval(outputs: dict, reference_outputs: dict) -> dict | None:
+def exclusion_recall_eval(outputs: dict, reference_outputs: dict) -> dict:
     labels = _labels(reference_outputs)
     score = exclusion_recall(
         outputs.get("retrieved_locators", []), labels.get("exclusion_locators", [])
     )
-    return None if score is None else {"key": "exclusion_recall", "score": score}
+    return {"key": "exclusion_recall", "score": score}
 
 
 def citation_accuracy_eval(outputs: dict, reference_outputs: dict) -> dict:

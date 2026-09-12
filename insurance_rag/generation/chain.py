@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from insurance_rag.config import settings
+from insurance_rag.ratelimit import with_retry
 from insurance_rag.retrieval.search import search_corpus
 from insurance_rag.schema import Chunk
 
@@ -14,7 +15,14 @@ __all__ = ["Answer", "answer", "cited", "format_context", "LADDER", "REFUSAL"]
 REFUSAL = "This corpus does not address that."
 
 #: Widen the window on a refusal before believing it. Existing knobs, no new ones.
-LADDER: tuple[int, ...] = (settings.rerank_top_k, settings.fusion_top_k, settings.dense_top_k)
+#: The `dense_top_k` rung is gone: measured at 7,719-12,534 prompt tokens, every request at that
+#: width breaches Groq's free 8,000 TPM ceiling. It was a stand-in for the missing reranker
+#: anyway, and 50 chunks dilute the context more than they help. Phase 5 escalates on the
+#: cross-encoder's confidence instead of on k.
+LADDER: tuple[int, ...] = (settings.rerank_top_k, settings.fusion_top_k)
+
+#: Below the 8,000 TPM ceiling with room for the system prompt, so one request can never 413.
+MAX_CONTEXT_TOKENS = 6000
 
 SYSTEM = """You answer questions about Ontario auto insurance using only the excerpts provided.
 
@@ -43,9 +51,20 @@ class Answer:
     retrieved: list[Chunk]  # everything the model saw - recall and citation metrics read this
 
 
+def within_budget(chunks: list[Chunk]) -> list[Chunk]:
+    """Drop the lowest-ranked chunks once the budget is spent; never truncate one mid-provision."""
+    kept, spent = [], 0
+    for chunk in chunks:
+        if spent + chunk.token_count > MAX_CONTEXT_TOKENS:
+            break
+        kept.append(chunk)
+        spent += chunk.token_count
+    return kept or chunks[:1]  # one oversized table still beats an empty prompt
+
+
 def format_context(chunks: list[Chunk]) -> str:
     """Each excerpt is prefixed with its locator - the model can only cite what it is given."""
-    return "\n\n".join(f"[{c.locator}]\n{c.text}" for c in chunks)
+    return "\n\n".join(f"[{c.locator}]\n{c.text}" for c in within_budget(chunks))
 
 
 @lru_cache(maxsize=1)
@@ -86,9 +105,8 @@ def answer(question: str, *, k: int | None = None) -> Answer:
         retrieved = search_corpus(question, k=width)
         if not retrieved:
             break
-        text = _chain().invoke(
-            {"context": format_context(retrieved), "question": question}
-        ).strip()
+        payload = {"context": format_context(retrieved), "question": question}
+        text = with_retry(lambda: _chain().invoke(payload)).strip()
         if REFUSAL not in text:
             # A cited-nothing answer is a prompt failure, not a reason to drop the provenance.
             return Answer(question, text, cited(text, retrieved) or retrieved, retrieved)

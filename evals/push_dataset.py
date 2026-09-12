@@ -15,16 +15,23 @@ from langsmith import Client
 from insurance_rag.config import settings
 from evals.validate_golden import GOLDEN_PATH, load_records
 
-#: Everything except question and answer rides as metadata for the custom evaluators.
+#: The labels the custom evaluators read back.
 LABEL_FIELDS = ("id", "hop", "gold_locators", "exclusion_locators", "answerable")
 
 
 def to_example(record: dict) -> dict:
-    """`question` -> inputs, `answer` -> outputs, the labels -> metadata."""
+    """`question` -> inputs; the answer AND the labels -> outputs.
+
+    Labels must live in `outputs`, not `metadata`: LangSmith hands an evaluator
+    `example.outputs` as `reference_outputs` and never hands it metadata. Labels put in
+    metadata arrive empty, and every evaluator then skips the record without erroring.
+    Metadata keeps a copy, which is what the LangSmith UI filters on.
+    """
+    labels = {field: record[field] for field in LABEL_FIELDS}
     return {
         "inputs": {"question": record["question"]},
-        "outputs": {"answer": record["answer"]},
-        "metadata": {field: record[field] for field in LABEL_FIELDS},
+        "outputs": {"answer": record["answer"], **labels},
+        "metadata": labels,
     }
 
 
