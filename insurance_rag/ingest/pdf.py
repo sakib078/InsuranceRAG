@@ -89,7 +89,7 @@ def _cover_headings(row: ManifestRow) -> set[str]:
 
 
 def _is_provision(heading: str, row: ManifestRow) -> bool:
-    """A provision heading is numbered or a short title - never a bullet, date, or the doc's name."""
+    """Numbered or a short title - never a bullet, a date, or the document's own name."""
     matched = _CLAUSE_RE.match(heading)
     if matched:
         return not _YEAR_RE.fullmatch(matched.group(1))
@@ -132,7 +132,10 @@ def units_from_markdown(row: ManifestRow, markdown: str, pages: list[str]) -> li
         if not provision:
             path = "Preamble"
         else:
-            path = matched.group(1) if matched else re.sub(r"\s+", " ", heading).strip() or "Preamble"
+            path = (
+                matched.group(1) if matched
+                else re.sub(r"\s+", " ", heading).strip() or "Preamble"
+            )
         seen[path] += 1
         if seen[path] > 1:  # a locator that resolves to two chunks is not a citation
             path = f"{path} ({seen[path]})"

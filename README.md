@@ -14,7 +14,7 @@ hybrid retrieval, cross-encoder reranked, and **measured at every stage**.
 | Hybrid (BM25 + dense, RRF) | — | — | pending Step 5 |
 | Hybrid + cross-encoder rerank | — | — | pending Step 6 |
 
-Measured against a 30–50 pair golden set written *before* any retrieval code existed.
+Measured against a 56-record golden set written *before* any retrieval code existed.
 Two model profiles are reported: `eval` (full-size weights) and `serve` (the smaller
 weights actually running in the deployed demo). Both run the identical pipeline.
 
@@ -54,9 +54,9 @@ Two things address it, and this repo measures both:
 
 ## Corpus
 
-Eleven public Ontario documents: the SABS (O. Reg. 34/10), OAP 1, R.R.O. 664 and 668,
-O. Reg. 461/96, the Insurance Act, and FSRA guidelines including the Minor Injury
-Guideline. ~2,900 chunks indexed.
+Twenty public Ontario documents: the SABS (O. Reg. 34/10), OAP 1, R.R.O. 664 and 668,
+O. Reg. 461/96, the Insurance Act, OPCF endorsements, and FSRA guidelines including the
+Minor Injury Guideline. 3,896 chunks indexed.
 
 Source PDFs are **not** committed. `data/manifest.csv` records the source URL,
 document type, page count, and licence note for every document; `scripts/fetch_corpus.py`
@@ -73,19 +73,19 @@ reproduces the corpus from it.
 | Sparse retrieval | Postgres `ts_rank` | planned |
 | Fusion | Reciprocal rank fusion | planned |
 | Reranking | Qwen3-Reranker-0.6B over fused top-k | planned |
-| Retrieval eval | recall@k, MRR — own harness, `evals/` | planned |
-| Generation eval | ragas — groundedness, answer relevance, context precision | planned |
+| Retrieval eval | recall@5 by hop, exclusion recall — own evaluators, `evals/` | built |
+| Generation eval | LangSmith judges + citation accuracy, `evals/` | built |
 | Serving | FastAPI + Docker | planned |
 
 The encoder is an **eval variable, not a deployment choice**: `IRAG_ENCODER=qwen3|bge-m3`
 selects a bi-encoder and its own family's reranker, and both run the identical pipeline
 over byte-identical chunks so the bake-off is a fair comparison.
 
-Retrieval runs entirely on local open-source models. **No API key is required to
-reproduce the numbers in the results table** — clone, fetch the corpus, run the
-eval suite. A key is only needed for the generation layer, and it is free: Groq's
-free tier serves the open-weight model, so there are no paid credits anywhere in
-the project.
+Retrieval runs entirely on local open-source models, so **the retrieval suite
+reproduces offline** — clone, fetch the corpus, `run_eval --suite retrieval`, no key.
+The generation suite needs keys: one for the answer model and a LangSmith key, which
+now owns the experiment stack. Both tiers are free — Groq's free tier serves the
+open-weight model — so there are no paid credits anywhere in the project.
 
 ## Repository layout
 
@@ -93,14 +93,16 @@ the project.
 insurance_rag/
   config.py          encoder bake-off specs, retrieval knobs, .env-only secrets
   schema.py          the Chunk contract — every ingester targets it
+  providers.py       OpenAI-compatible endpoints for the generator and the judges
+  ratelimit.py       retry through provider rate limits
   corpus/            manifest handling, provenance enums
   ingest/            e-Laws DOM, Docling PDF, splitting, role classification
   retrieval/         store.py (pgvector), search.py (the one retrieval seam)
   generation/        chain.py (LCEL), citations.py (provenance blocks)
   tracing/           per-query latency, tokens, chunk IDs, cost      [planned]
   api/               FastAPI app                                     [planned]
-evals/               golden set, retrieval harness, ragas suite, results
-tests/               chunking tests + golden-set regression gate
+evals/               golden set, custom + LangSmith evaluators, results
+tests/               chunking tests + golden-set regression gate     [planned]
 scripts/             fetch_corpus.py, ingest.py, index.py, ask.py
 notebooks/           embed_colab.ipynb — GPU batch embedding
 ```

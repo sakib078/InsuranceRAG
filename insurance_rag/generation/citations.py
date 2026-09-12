@@ -1,4 +1,4 @@
-"""Renders a chunk's provenance block. The locator is already human-verifiable; this adds the rest."""
+"""Renders a chunk's provenance block; the locator is human-verifiable, this adds the rest."""
 
 from __future__ import annotations
 
@@ -28,7 +28,11 @@ def render_citation(chunk: Chunk, index: dict[str, ManifestRow]) -> str:
         head += "  [REVOKED]"
 
     date = row.consolidation_date or row.retrieval_date
-    meta = " . ".join(part for part in (f"Consolidated {date}" if date else "", _short_url(row.source_url)) if part)
+    meta = " . ".join(
+        part
+        for part in (f"Consolidated {date}" if date else "", _short_url(row.source_url))
+        if part
+    )
 
     lines = [head, meta, "Not an official version."]
     if not chunk.is_official:

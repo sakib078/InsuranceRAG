@@ -12,8 +12,8 @@ import argparse
 
 from langsmith import Client
 
-from insurance_rag.config import settings
 from evals.validate_golden import GOLDEN_PATH, load_records
+from insurance_rag.config import settings
 
 #: The labels the custom evaluators read back.
 LABEL_FIELDS = ("id", "hop", "gold_locators", "exclusion_locators", "answerable")

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from insurance_rag.config import settings
+from insurance_rag.providers import chat_model
 from insurance_rag.ratelimit import with_retry
 from insurance_rag.retrieval.search import search_corpus
 from insurance_rag.schema import Chunk
@@ -16,12 +17,12 @@ REFUSAL = "This corpus does not address that."
 
 #: Widen the window on a refusal before believing it. Existing knobs, no new ones.
 #: The `dense_top_k` rung is gone: measured at 7,719-12,534 prompt tokens, every request at that
-#: width breaches Groq's free 8,000 TPM ceiling. It was a stand-in for the missing reranker
-#: anyway, and 50 chunks dilute the context more than they help. Phase 5 escalates on the
-#: cross-encoder's confidence instead of on k.
+#: width breaches the 8,000 TPM ceiling of the free tier this was measured on. It was a stand-in
+#: for the missing reranker anyway, and 50 chunks dilute the context more than they help. Phase 5
+#: escalates on the cross-encoder's confidence instead of on k.
 LADDER: tuple[int, ...] = (settings.rerank_top_k, settings.fusion_top_k)
 
-#: Below the 8,000 TPM ceiling with room for the system prompt, so one request can never 413.
+#: Below that 8,000 TPM ceiling with room for the system prompt, so one request can never 413.
 MAX_CONTEXT_TOKENS = 6000
 
 SYSTEM = """You answer questions about Ontario auto insurance using only the excerpts provided.
@@ -69,17 +70,8 @@ def format_context(chunks: list[Chunk]) -> str:
 
 @lru_cache(maxsize=1)
 def _model():
-    """Open-weight model on Groq; swapping the provider is this function and nothing else."""
-    from langchain_groq import ChatGroq
-
-    if not settings.groq_api_key:
-        raise SystemExit("set IRAG_GROQ_API_KEY in .env - get one at console.groq.com/keys")
-    return ChatGroq(
-        model=settings.generation_model,
-        api_key=settings.groq_api_key,
-        temperature=0,
-        max_tokens=1024,
-    )
+    """The open-weight generator; swapping the provider is a config key, not a code change."""
+    return chat_model(settings.generation_provider, settings.generation_model, max_tokens=1024)
 
 
 @lru_cache(maxsize=1)

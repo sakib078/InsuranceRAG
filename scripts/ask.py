@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from insurance_rag.config import settings
 from insurance_rag.generation.chain import Answer, answer
@@ -19,7 +19,7 @@ def trace(result: Answer) -> None:
     path = settings.trace_log_path
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {
-        "at": datetime.now(timezone.utc).isoformat(),
+        "at": datetime.now(UTC).isoformat(),
         "encoder": str(settings.encoder),
         "model": settings.generation_model,
         "question": result.question,
