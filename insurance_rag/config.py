@@ -76,8 +76,10 @@ class Settings(BaseSettings):
     # client has to be handed the key rather than left to find it.
     langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
     langsmith_dataset: str = "insurance-rag-golden"
-    # An OpenRouter model id; verify it is still served at openrouter.ai/models.
-    judge_model: str = "deepseek/deepseek-chat-v3-0324:free"
+    # gemini | openrouter. Both are reached over their OpenAI-compatible endpoints, so
+    # neither needs a provider SDK; `judge_model` must match whichever is selected.
+    judge_provider: str = "gemini"
+    judge_model: str = "gemini-2.5-flash"
 
     # --- agent ---
     max_agent_steps: int = 6

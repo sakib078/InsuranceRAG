@@ -130,7 +130,8 @@ def main() -> None:
     parser.add_argument("--config", default="dense_clause_aware", help="name for this row")
     parser.add_argument("-k", type=int, default=settings.rerank_top_k)
     parser.add_argument("--dataset", default=settings.langsmith_dataset)
-    parser.add_argument("--concurrency", type=int, default=2)
+    # The judge free tier is the bottleneck (Gemini 2.5 Flash: 5 req/min), not the pipeline.
+    parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--misses", action="store_true", help="list the records that scored 0")
     args = parser.parse_args()
 
