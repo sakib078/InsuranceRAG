@@ -1,0 +1,15 @@
+{
+  "config": "dense_uniform_512",
+  "suite": "retrieval",
+  "at": "2026-09-13T21:44:07.338354+00:00",
+  "k": 5,
+  "encoder": "qwen3",
+  "chunking": "uniform",
+  "coverage_threshold": 0.5,
+  "records": 56,
+  "scores": {
+    "recall@5_single": 0.8421052631578947,
+    "recall@5_multi": 0.05,
+    "exclusion_recall": 0.35
+  }
+}

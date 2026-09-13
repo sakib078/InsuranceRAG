@@ -595,7 +595,8 @@ The README table filled, every row from `evals/results/*.json`:
 
 | Configuration | recall@5 single | recall@5 multi | exclusion recall | citation accuracy | correctness | groundedness |
 |---|---|---|---|---|---|---|
-| Dense only, uniform 512 | | | | | | |
+| Dense, uniform 512 (k=2, theta 0.5) | 0.421 | 0.050 | 0.350 | n/a | n/a | n/a |
+| Dense, uniform 512 (k=5, theta 0.5) | 0.842 | 0.050 | 0.350 | n/a | n/a | n/a |
 | **Dense, clause-aware (baseline)** | **0.737** | **0.050** | **0.450** | **0.501** | **0.768** | **0.661** |
 | + hybrid retrieval and cross-encoder rerank | | | | | | |
 | + agent with coverage loop | | | | | | |
@@ -608,6 +609,46 @@ errors. Full record in `evals/results/dense_clause_aware_generation.json`.
 while both were guesses; the baseline settled which failure each addresses, and a generation
 row now costs a judge tier and ~25 minutes. One row for "the retrieval fix" is worth more than
 two rows separated by a change nobody will ask about.
+
+### Phase 3 result - clause-aware chunking is vindicated, on three counts
+
+| configuration | prompt tokens | single | multi | exclusion |
+|---|---|---|---|---|
+| clause-aware k=5 | 825 | 0.737 | 0.050 | 0.450 |
+| uniform-512 k=5 | 2,810 | 0.842 | 0.050 | 0.350 |
+| uniform-512 k=2 | 1,124 | 0.421 | 0.050 | 0.350 |
+
+**1. Uniform's k=5 lead is a context-budget artifact.** It scores +0.105 on single-hop while
+reading 3.4x more text. At k=2 - where it still holds 1.4x the context - it collapses to 0.421,
+a 0.316 loss. Without the k=2 column this table would have published the naive chunker as the
+winner, and the conclusion would have been wrong.
+
+**2. Exclusion recall is worse under uniform at every setting: 0.350 against 0.450**, even at
+k=5 with 3.4x the context. Fat windows do not help find the clause that cancels coverage, they
+dilute it. This is the metric that catches a confident "yes, you are covered" that missed the
+limit, so it is the one that matters most here.
+
+**3. Multi-hop is identical at 0.050**, which kills the hypothesis this row existed to test.
+The sceptic's reading of 0.050 is "you cut the documents too small; fatter windows would hold
+three provisions at once." They do not. Multi-hop is hard for reasons unrelated to chunk size,
+so Phases 4 and 5 are aimed correctly - measured, not assumed.
+
+At theta 1.0 multi-hop is 0.000 against a ceiling of 0.400, so that zero is real rather than
+capped, and single-hop holds at 0.789 / 0.421. The story is the same at both thresholds, which
+is what publishing both bounds was for.
+
+**No generation row for this configuration.** A uniform window carries no clause locator, so
+citation accuracy is undefined rather than low - the naive chunker forfeits the product's core
+promise outright, and that needs no judge to establish.
+
+**Two defects this phase exposed, both fixed:**
+
+- `langchain_pg_embedding` has `PRIMARY KEY (id)`, not `(id, collection_id)`. The uniform arm
+  reused `make_chunk_id`, so its first index run UPDATED 866 clause-aware rows instead of
+  inserting into its own collection. `make_chunk_id` now takes a `prefix` and uniform mints
+  `doc_id:u0000`; `Chunk.__post_init__` validates by regex so drift is still caught.
+- The clause-aware index carried 5 orphan rows from an ingest predating the `pdf.py` locator
+  fixes. The rebuild is an exact 3,896 match to disk - the first time index and corpus agree.
 
 ### What the baseline says about the rest of the plan
 
