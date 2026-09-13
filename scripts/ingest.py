@@ -7,15 +7,16 @@ import json
 from collections import Counter
 from dataclasses import asdict
 
-from insurance_rag.config import DATA_DIR
+from insurance_rag.config import Chunking, settings
 from insurance_rag.corpus.manifest import Access, ManifestRow, Phase, load_manifest, select
 from insurance_rag.ingest.pdf import load_pdf
 from insurance_rag.ingest.roles import harvest_terms
 from insurance_rag.ingest.split import to_chunks
+from insurance_rag.ingest.uniform import to_uniform_chunks
 from insurance_rag.ingest.webpages import load_web
 from insurance_rag.schema import Chunk
 
-CHUNKS_DIR = DATA_DIR / "chunks"
+GOLD_MAP = "_gold_map.json"  # underscore-prefixed, so every chunk reader skips it
 
 
 def load_units(row: ManifestRow, *, refresh: bool):
@@ -23,8 +24,8 @@ def load_units(row: ManifestRow, *, refresh: bool):
 
 
 def write_chunks(doc_id: str, chunks: list[Chunk]) -> None:
-    CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
-    with (CHUNKS_DIR / f"{doc_id}.jsonl").open("w", encoding="utf-8") as fh:
+    settings.chunks_dir.mkdir(parents=True, exist_ok=True)
+    with (settings.chunks_dir / f"{doc_id}.jsonl").open("w", encoding="utf-8") as fh:
         for chunk in chunks:
             fh.write(json.dumps(asdict(chunk), ensure_ascii=False) + "\n")
 
@@ -42,7 +43,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--doc-id", help="ingest a single document")
     parser.add_argument("--refresh", action="store_true", help="re-fetch HTML from source_url")
+    parser.add_argument("--uniform", action="store_true",
+                        help="the ablation arm: fixed 512-token windows, ignoring structure")
     args = parser.parse_args()
+
+    if args.uniform:
+        # Set before anything reads a path or a collection - both are cached per process.
+        settings.chunking = Chunking.UNIFORM
+        if args.refresh:
+            parser.error("--uniform with --refresh would re-fetch the frozen corpus")
 
     rows = select(load_manifest(), phase=Phase.V1)
     if args.doc_id:
@@ -54,10 +63,22 @@ def main() -> None:
     terms = harvest_terms([u.page_content for _, units in loaded for u in units])
     print(f"{len(terms)} defined terms harvested\n")
 
+    gold_map: dict[str, dict[str, float]] = {}
     for row, units in loaded:
-        chunks = to_chunks(row, units, terms)
+        if args.uniform:
+            chunks, gold = to_uniform_chunks(row, units)
+            gold_map.update(gold)
+        else:
+            chunks = to_chunks(row, units, terms)
         write_chunks(row.doc_id, chunks)
         report(row.doc_id, chunks)
+
+    if args.uniform:
+        # Gold locators cannot resolve against a window, so record how much of each provision
+        # every window holds; the eval applies its own threshold to this.
+        (settings.chunks_dir / GOLD_MAP).write_text(
+            json.dumps(gold_map, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"\n{len(gold_map)} provisions mapped -> {settings.chunks_dir.name}/{GOLD_MAP}")
 
 
 if __name__ == "__main__":

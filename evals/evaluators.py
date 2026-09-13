@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterable, Sequence
 from functools import lru_cache
 
-from insurance_rag.config import DATA_DIR, settings
+from insurance_rag.config import DATA_DIR, Chunking, settings
 from insurance_rag.corpus.manifest import Status, load_manifest
 
 __all__ = [
@@ -16,6 +16,10 @@ __all__ = [
 
 CHUNKS_DIR = DATA_DIR / "chunks"
 
+#: Share of a provision a uniform window must hold to count as having retrieved it.
+#: Set by run_eval before the first score; see evals/uniform.py for why 0.5.
+COVERAGE = 0.5
+
 
 def _matches(gold: str, locator: str) -> bool:
     """A gold label also matches the ` #2` sub-chunks an oversized provision was split into."""
@@ -23,6 +27,11 @@ def _matches(gold: str, locator: str) -> bool:
 
 
 def _found(gold: str, locators: Iterable[str]) -> bool:
+    """Clause-aware matches by locator; uniform windows have none, so they match by coverage."""
+    if settings.chunking is Chunking.UNIFORM:
+        from evals.uniform import covered
+
+        return covered(gold, list(locators), COVERAGE)
     return any(_matches(gold, locator) for locator in locators)
 
 

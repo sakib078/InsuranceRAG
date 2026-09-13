@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from insurance_rag.config import DATA_DIR, settings
+from insurance_rag.config import Chunking, settings
 from insurance_rag.retrieval.store import (
     add_chunks,
     connection_string,
@@ -19,8 +19,6 @@ from insurance_rag.retrieval.store import (
     vector_store,
 )
 from insurance_rag.schema import Chunk
-
-CHUNKS_DIR = DATA_DIR / "chunks"
 
 
 def add_precomputed(chunks: list[Chunk], path: Path) -> None:
@@ -45,14 +43,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--doc-id", help="index one document instead of the whole corpus")
     parser.add_argument("--embeddings", type=Path, help="directory of {doc_id}.npz from Colab")
+    parser.add_argument("--chunking", choices=("clause", "uniform"), default="clause")
     args = parser.parse_args()
 
-    pattern = f"{args.doc_id}.jsonl" if args.doc_id else "*.jsonl"
-    paths = sorted(p for p in CHUNKS_DIR.glob(pattern) if not p.name.startswith("_"))
-    if not paths:
-        raise SystemExit(f"no chunk files matching {pattern} in {CHUNKS_DIR}")
+    # Before anything opens the store: the collection and the chunk directory are both cached
+    # per process, so choosing late would write the uniform corpus into the clause-aware index.
+    settings.chunking = Chunking(args.chunking)
 
-    print(f"collection chunks_{settings.encoder} -> {connection_string()}")
+    pattern = f"{args.doc_id}.jsonl" if args.doc_id else "*.jsonl"
+    chunks_dir = settings.chunks_dir
+    paths = sorted(p for p in chunks_dir.glob(pattern) if not p.name.startswith("_"))
+    if not paths:
+        raise SystemExit(f"no chunk files matching {pattern} in {chunks_dir}")
+
+    print(f"collection {settings.collection_name} -> {connection_string()}")
     total = 0
     for path in paths:
         chunks = read_chunks(path)

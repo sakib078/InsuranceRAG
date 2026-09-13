@@ -21,6 +21,13 @@ EVALS_DIR = REPO_ROOT / "evals"
 RESULTS_DIR = EVALS_DIR / "results"
 
 
+class Chunking(StrEnum):
+    """How the corpus was cut. An eval variable: the uniform arm exists to be compared."""
+
+    CLAUSE = "clause"
+    UNIFORM = "uniform"
+
+
 class Encoder(StrEnum):
     QWEN3 = "qwen3"
     BGE_M3 = "bge-m3"
@@ -45,6 +52,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="IRAG_", extra="ignore")
 
     encoder: Encoder = Encoder.QWEN3
+    #: clause | uniform. Switches the chunk directory and the pgvector collection together,
+    #: so the two corpora can never be read through each other.
+    chunking: Chunking = Chunking.CLAUSE
 
     # --- storage ---
     # No default: credentials live in .env only, so none can be committed by accident.
@@ -104,6 +114,16 @@ class Settings(BaseSettings):
 
     # --- tracing ---
     trace_log_path: Path = DATA_DIR / "traces.jsonl"
+
+    @property
+    def chunks_dir(self) -> Path:
+        return DATA_DIR / ("chunks" if self.chunking is Chunking.CLAUSE else "chunks_uniform")
+
+    @property
+    def collection_name(self) -> str:
+        """The clause-aware name is unchanged, so the frozen index is never touched."""
+        suffix = "" if self.chunking is Chunking.CLAUSE else "_uniform"
+        return f"chunks_{self.encoder}{suffix}"
 
     @property
     def spec(self) -> EncoderSpec:
