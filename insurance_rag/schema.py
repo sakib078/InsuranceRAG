@@ -30,8 +30,9 @@ class ChunkRole(StrEnum):
 LOCATOR_RE = re.compile(r"^.+ s\. .+$")
 
 
-def make_chunk_id(doc_id: str, ordinal: int) -> str:
-    return f"{doc_id}:{ordinal:04d}"
+def make_chunk_id(doc_id: str, ordinal: int, *, prefix: str = "") -> str:
+    """`prefix` separates corpora: pgvector keys on id alone, so two arms must not share one."""
+    return f"{doc_id}:{prefix}{ordinal:04d}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,5 +59,7 @@ class Chunk:
             raise ValueError(f"{self.chunk_id}: doc_type {self.doc_type!r} cannot be ingested")
         if self.token_count <= 0:
             raise ValueError(f"{self.chunk_id}: token_count must be positive")
-        if self.chunk_id != make_chunk_id(self.doc_id, self.ordinal):
+        # The id still has to encode doc_id and ordinal, so drift is caught; an optional
+        # lowercase prefix distinguishes one corpus from another.
+        if not re.fullmatch(rf"{re.escape(self.doc_id)}:[a-z]*{self.ordinal:04d}", self.chunk_id):
             raise ValueError(f"{self.chunk_id}: does not match doc_id/ordinal")

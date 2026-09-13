@@ -26,7 +26,9 @@ from evals.evaluators import (
     recall_single,
 )
 from evals.validate_golden import GOLDEN_PATH, load_records
-from insurance_rag.config import settings
+from evals import evaluators
+from insurance_rag.config import Chunking, settings
+from insurance_rag.providers import judges_used
 from insurance_rag.retrieval.search import search_with_scores
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -167,6 +169,10 @@ def run_generation(dataset: str, config: str, concurrency: int, pin_k: int | Non
     )
     totals, rows, errored = _tally(results)
     summary = report(totals)
+    served = judges_used()
+    if len(served) > 1:
+        print(f"\njudged by more than one model: {served} - failover moved down the chain "
+              "mid-run, so this row is not a single judge's verdict.")
     _guard(errored, rows)
     return summary
 
@@ -180,7 +186,7 @@ def describe(config: str, pin_k: int | None) -> dict:
         "encoder": str(settings.encoder),
         "retrieval": f"pinned k={pin_k}" if pin_k else "ladder",
         "generation": f"{settings.generation_provider}/{settings.generation_model}",
-        "judge": f"{settings.judge_provider}/{settings.judge_model}",
+        "judge_chain": settings.judge_chain,
     }
 
 
@@ -211,11 +217,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pin-k", type=int, default=None,
                         help="generation: fix k and skip the retry ladder, ~40%% fewer tokens")
     parser.add_argument("--misses", action="store_true", help="list the records that scored 0")
+    parser.add_argument("--chunking", choices=("clause", "uniform"), default="clause")
+    parser.add_argument("--coverage", type=float, default=0.5,
+                        help="uniform only: share of a provision a window must hold to count")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    # Both the chunk directory and the pgvector collection are cached per process, so the
+    # corpus has to be chosen before anything reads either.
+    settings.chunking = Chunking(args.chunking)
+    evaluators.COVERAGE = args.coverage
+
     records = load_records(GOLDEN_PATH)
     retrieval = args.suite == "retrieval"
 
@@ -227,10 +242,13 @@ def main() -> None:
 
     if retrieval:
         summary = run_retrieval(records, args.k, args.misses)
-        provenance = {"k": args.k, "encoder": str(settings.encoder)}
+        provenance = {"k": args.k, "encoder": str(settings.encoder),
+                      "chunking": args.chunking}
+        if args.chunking == "uniform":
+            provenance["coverage_threshold"] = args.coverage
     else:
         summary = run_generation(args.dataset, args.config, args.concurrency, args.pin_k)
-        provenance = describe(args.config, args.pin_k)
+        provenance = describe(args.config, args.pin_k) | {"judges_served": judges_used()}
 
     write(
         {

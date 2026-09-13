@@ -1,138 +1,94 @@
 # InsuranceRAG
 
-Retrieval-augmented question answering over Canadian auto insurance policy documents —
-hybrid retrieval, cross-encoder reranked, and **measured at every stage**.
+Ask a question about Ontario auto insurance, get an answer with the clause it came from.
 
-> **Status: end-to-end pipeline running — ingestion → pgvector → cited answer.**
-> Dense retrieval only; sparse, fusion and rerank are next.
+Every answer cites a provision you can open on ontario.ca and read yourself — or it refuses.
+The interesting part isn't the pipeline; it's that the whole thing is measured against a
+hand-labelled golden set, so the weak spots are numbers rather than opinions.
+
+> **Status:** end-to-end and measured. Dense retrieval only — sparse, fusion and rerank next.
 
 ## Results
 
-| Configuration | recall@5 | MRR | Notes |
-|---|---|---|---|
-| Dense only (baseline) | — | — | pending Step 4 |
-| Hybrid (BM25 + dense, RRF) | — | — | pending Step 5 |
-| Hybrid + cross-encoder rerank | — | — | pending Step 6 |
+Measured on 56 hand-written question/answer pairs, each labelled with the clauses that
+should be retrieved. 20 Ontario documents, 3,896 chunks.
 
-Measured against a 56-record golden set written *before* any retrieval code existed.
-Two model profiles are reported: `eval` (full-size weights) and `serve` (the smaller
-weights actually running in the deployed demo). Both run the identical pipeline.
+| Configuration | recall@5 single | recall@5 multi | exclusion recall | citation accuracy | correctness |
+|---|---|---|---|---|---|
+| **Dense only (baseline)** | **0.737** | **0.050** | **0.450** | **0.501** | **0.768** |
+| + hybrid retrieval & cross-encoder rerank | — | — | — | — | pending |
+| + agent with coverage loop | — | — | — | — | pending |
 
-### Findings so far — dense-only, pre-rerank
+### The number that matters
 
-- A **definition lookup** retrieves cleanly: `"what counts as an accident?"` →
-  `O. Reg. 34/10 s. 3(1) “accident”` at cosine distance 0.327.
-- A **clause lookup** has no signal at all: `"s. 31"` returns a top-5 spread of 0.006.
-  This is the measured case for sparse retrieval, not a hunch.
-- Retrieval is **phrasing-bound, not meaning-bound.** Two paraphrases of one question —
-  *"my insurance company stopped my wage loss payments"* and *"when can an insurer refuse
-  to pay income replacement benefits?"* — returned **disjoint** evidence sets (s. 58 and
-  s. 61 vs s. 5, s. 6 and s. 37). Both answers were defensible; neither surfaced s. 31,
-  the provision actually titled *Circumstances in which certain benefits not payable*.
+Splitting the same run by whether retrieval actually found the right clauses:
 
-The third finding is the one that motivates the rest of the retrieval work: a claimant
-asking in their own words and one asking in the regulation's words get different law back,
-with no signal that the other half exists.
+| gold clauses in top-5 | questions | correctness |
+|---|---|---|
+| all found | 15 | **0.933** |
+| some found | 14 | 0.857 |
+| none found | 10 | **0.300** |
 
-## The problem
+**A 3× swing in answer quality, attributable entirely to retrieval.** Of the ten answers
+graded wrong, eight were cases where the governing clause never reached the model. It wasn't
+making things up — it was never shown the answer.
 
-Insurance policies are adversarially structured for naive retrieval. An exclusion
-clause and the coverage clause it contradicts are near-identical in wording and
-sit in the same semantic neighbourhood — "loss or damage caused by collision" and
-"this policy does not cover loss or damage caused by collision" embed to almost the
-same vector. Dense-only retrieval will happily hand back the wrong one, and the
-generated answer will be fluent, confident, and wrong in the direction that costs
-a claimant money.
+That's the case for the next phase, measured rather than assumed.
 
-Two things address it, and this repo measures both:
+## Why insurance is hard for RAG
 
-- **BM25 alongside dense retrieval**, because exact clause numbers and defined terms
-  (`OPCF 44R`, "Named Insured") are lexical signals that embeddings smooth away.
-- **A cross-encoder reranker** over the fused candidates, which scores the
-  query and passage *jointly* rather than comparing two independently-produced
-  vectors — the only stage that can actually see the negation.
+A coverage clause and the exclusion that cancels it are nearly identical in wording.
+*"loss or damage caused by collision"* and *"this policy does not cover loss or damage caused
+by collision"* land in almost the same place in embedding space. Retrieve the wrong one and
+the answer is fluent, confident, and wrong in the direction that costs a claimant money.
 
-## Corpus
+Two measured failures from this corpus:
 
-Twenty public Ontario documents: the SABS (O. Reg. 34/10), OAP 1, R.R.O. 664 and 668,
-O. Reg. 461/96, the Insurance Act, OPCF endorsements, and FSRA guidelines including the
-Minor Injury Guideline. 3,896 chunks indexed.
+- **`"s. 31"` returns a top-5 cosine spread of 0.006** — no signal at all. Clause numbers are
+  lexical, and embeddings smooth them away.
+- **Two paraphrases of one question returned disjoint evidence.** *"my insurance company
+  stopped my wage loss payments"* and *"when can an insurer refuse to pay income replacement
+  benefits?"* shared not one chunk, and neither surfaced s. 31 — the provision literally
+  titled *Circumstances in which certain benefits not payable*.
 
-Source PDFs are **not** committed. `data/manifest.csv` records the source URL,
-document type, page count, and licence note for every document; `scripts/fetch_corpus.py`
-reproduces the corpus from it.
+A claimant asking in their own words and one asking in the regulation's words get different
+law back, with no signal that the other half exists.
 
 ## Stack
 
-| Layer | Choice | |
+| | | |
 |---|---|---|
-| Ingestion | Docling (PDF layout) + direct e-Laws DOM walk (HTML) | built |
-| Chunking | Structural — one provision per chunk, never merged across clauses | built |
-| Dense retrieval | Qwen3-Embedding-0.6B → Postgres 16 + pgvector | built |
-| Generation | `openai/gpt-oss-120b`, open weights, served by Groq | built |
-| Sparse retrieval | Postgres `ts_rank` | planned |
-| Fusion | Reciprocal rank fusion | planned |
-| Reranking | Qwen3-Reranker-0.6B over fused top-k | planned |
-| Retrieval eval | recall@5 by hop, exclusion recall — own evaluators, `evals/` | built |
-| Generation eval | LangSmith judges + citation accuracy, `evals/` | built |
-| Serving | FastAPI + Docker | planned |
+| Ingestion | Docling for PDF layout, direct DOM walk for e-Laws HTML | built |
+| Chunking | One provision per chunk, never merged across clauses | built |
+| Retrieval | Qwen3-Embedding-0.6B → Postgres 16 + pgvector | built |
+| Generation | `gpt-oss-120b`, open weights, served by Groq | built |
+| Eval | Own locator-based evaluators + LangSmith judges | built |
+| Next | Sparse `ts_rank`, RRF, cross-encoder rerank, LangGraph agent | planned |
 
-The encoder is an **eval variable, not a deployment choice**: `IRAG_ENCODER=qwen3|bge-m3`
-selects a bi-encoder and its own family's reranker, and both run the identical pipeline
-over byte-identical chunks so the bake-off is a fair comparison.
+One Postgres holds the chunks, the embeddings and (soon) the full-text index — rather than a
+vector database beside a search engine.
 
-Retrieval runs entirely on local open-source models, so **the retrieval suite
-reproduces offline** — clone, fetch the corpus, `run_eval --suite retrieval`, no key.
-The generation suite needs keys: one for the answer model and a LangSmith key, which
-now owns the experiment stack. Both tiers are free — Groq's free tier serves the
-open-weight model — so there are no paid credits anywhere in the project.
-
-## Repository layout
-
-```
-insurance_rag/
-  config.py          encoder bake-off specs, retrieval knobs, .env-only secrets
-  schema.py          the Chunk contract — every ingester targets it
-  providers.py       OpenAI-compatible endpoints for the generator and the judges
-  ratelimit.py       retry through provider rate limits
-  corpus/            manifest handling, provenance enums
-  ingest/            e-Laws DOM, Docling PDF, splitting, role classification
-  retrieval/         store.py (pgvector), search.py (the one retrieval seam)
-  generation/        chain.py (LCEL), citations.py (provenance blocks)
-  tracing/           per-query latency, tokens, chunk IDs, cost      [planned]
-  api/               FastAPI app                                     [planned]
-evals/               golden set, custom + LangSmith evaluators, results
-tests/               chunking tests + golden-set regression gate     [planned]
-scripts/             fetch_corpus.py, ingest.py, index.py, ask.py
-notebooks/           embed_colab.ipynb — GPU batch embedding
-```
-
-Until `tracing/` exists, `scripts/ask.py` appends one JSON line per query to
-`data/traces.jsonl`: question, answer, chunk IDs, and locators.
+The retrieval metrics need no API key: they're set arithmetic over clause locators, so
+`run_eval --suite retrieval` reproduces offline. Only the LLM-judged metrics need keys, and
+every provider used is on a free tier.
 
 ## Quickstart
 
 ```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[eval,dev]"
-cp .env.example .env
+cp .env.example .env          # set IRAG_POSTGRES_DSN — it has no default, by design
 
 docker run -d --name pgvector -p 6024:5432 \
-  -e POSTGRES_USER=... -e POSTGRES_PASSWORD=... -e POSTGRES_DB=... \
-  pgvector/pgvector:pg16
+  -e POSTGRES_USER=... -e POSTGRES_PASSWORD=... -e POSTGRES_DB=... pgvector/pgvector:pg16
 
-python -m scripts.ingest                              # → data/chunks/*.jsonl
-python -m scripts.index --embeddings data/embeddings  # vectors from the Colab notebook
+python -m scripts.fetch_corpus   # e-Laws HTML; FSRA PDFs are hand-downloaded
+python -m scripts.ingest         # → data/chunks/*.jsonl
+python -m scripts.index --embeddings data/embeddings
 python -m scripts.ask "is physiotherapy covered after a minor injury?"
 ```
 
-`IRAG_POSTGRES_DSN` has no default — set it in `.env` (psycopg3 form,
-`postgresql+psycopg://…`, host-side port) or config fails at import. That is
-deliberate: no credential can reach a commit by sitting in `config.py`.
-
-Bulk embedding runs on Colab (`notebooks/embed_colab.ipynb`) and `scripts/index.py`
-inserts the precomputed vectors, so no local GPU is needed. To embed locally
-instead, drop `--embeddings` and expect hours on CPU.
+Bulk embedding runs on Colab (`notebooks/embed_colab.ipynb`); indexing inserts the
+precomputed vectors, so no local GPU is needed.
 
 Inspect retrieval without spending a model call:
 
@@ -140,7 +96,21 @@ Inspect retrieval without spending a model call:
 python -m insurance_rag.retrieval.search "minor injury" -k 10 --text
 ```
 
-## Licence
+Re-run the evaluation:
 
-Code is MIT. Source documents are public filings published by their respective
-issuers and are not redistributed here — see `data/manifest.csv` for provenance.
+```bash
+python -m evals.run_eval --suite retrieval  --config dense_clause_aware --misses
+python -m evals.run_eval --suite generation --config dense_clause_aware --pin-k 5
+```
+
+## Corpus and licence
+
+Twenty public Ontario documents — the SABS, OAP 1, the Insurance Act, R.R.O. 664/668/676,
+OPCF endorsements, FSRA guidelines — plus two **revoked** regulations kept deliberately as
+distractors, because e-Laws serves repealed law at live URLs with no structural marker.
+
+Source documents are not committed. `data/manifest.csv` records the URL, consolidation date,
+status and licence note for each; `scripts/fetch_corpus.py` rebuilds the corpus from it.
+
+Code is MIT. Ontario legislation is reproduced under King's Printer terms, which require
+stating that this is **not an official version**. Every citation the system emits says so.

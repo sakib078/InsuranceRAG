@@ -485,6 +485,11 @@ in the results file.
 
 ## Phase 4 — Sparse retrieval and RRF
 
+> **Phases 4 and 5 share one generation row.** They stay separate phases because they are
+> separate builds with separate retrieval verifications, but only the reranked pipeline gets
+> judged. Two generation rows either side of a change nobody asks about is not worth a judge
+> tier and 25 minutes; run the retrieval suite after each, and the generation suite once.
+
 The fix for `"s. 31"` and for the disjoint-paraphrase result.
 
 1. **tsvector + GIN.** `langchain-postgres` stores chunk text in
@@ -588,13 +593,44 @@ env-var driven, so `chain.py` needs no code change to be traced.
 
 The README table filled, every row from `evals/results/*.json`:
 
-| Configuration | correctness | citation accuracy | exclusion recall | recall@5 single | recall@5 multi |
-|---|---|---|---|---|---|
-| Dense only, uniform 512 | | | | | |
-| + clause-aware chunking | | | | | |
-| + sparse hybrid (RRF) | | | | | |
-| + cross-encoder rerank | | | | | |
-| + agent with coverage loop | | | | | |
+| Configuration | recall@5 single | recall@5 multi | exclusion recall | citation accuracy | correctness | groundedness |
+|---|---|---|---|---|---|---|
+| Dense only, uniform 512 | | | | | | |
+| **Dense, clause-aware (baseline)** | **0.737** | **0.050** | **0.450** | **0.501** | **0.768** | **0.661** |
+| + hybrid retrieval and cross-encoder rerank | | | | | | |
+| + agent with coverage loop | | | | | | |
+
+The baseline row: 2026-09-13, 56 records, `pinned k=5`, generation `groq/openai/gpt-oss-120b`,
+judged entirely by `gemini/models/gemini-3.5-flash-lite` (112 calls, no failover), 0% target
+errors. Full record in `evals/results/dense_clause_aware_generation.json`.
+
+**Sparse+RRF and the reranker are measured as one row, not two.** They were separate phases
+while both were guesses; the baseline settled which failure each addresses, and a generation
+row now costs a judge tier and ~25 minutes. One row for "the retrieval fix" is worth more than
+two rows separated by a change nobody will ask about.
+
+### What the baseline says about the rest of the plan
+
+Splitting the same run by whether retrieval found the gold clauses:
+
+| gold in top-5 | n | correctness | groundedness | citation |
+|---|---|---|---|---|
+| all found | 15 | 0.933 | 0.933 | 0.733 |
+| some found | 14 | 0.857 | 0.857 | 0.220 |
+| none found | 10 | 0.300 | 0.600 | 0.000 |
+
+Eight of the ten answers graded wrong had **zero** gold clauses in the top 5. The generator is
+not the weak link; retrieval is, and the margin is 3x. Phases 4-5 are aimed correctly.
+
+Two evaluator issues the baseline exposed, both to fix before the next generation row:
+
+- **Groundedness is meaningless on the refusal slice.** Those 17 records have empty FACTS, so
+  the judge is asked whether a refusal is grounded in nothing and says no - scoring 0.294 and
+  dragging the headline from ~0.82 down to 0.661. It needs the same skip that exclusion recall
+  already has.
+- **3 of 17 refusals answered anyway**, each citing 2-5 chunks: the instalment interest rate,
+  the catastrophic assessment wait, and the claims history report. All three are the near-miss
+  traps the golden set was built with - the corpus holds adjacent-looking provisions.
 
 Plus, per the Definition of Done: a live URL, a passing CI badge with the regression gate
 active, every answer carrying a verifiable clause citation, `SECURITY.md`, and a 90-second

@@ -21,6 +21,13 @@ EVALS_DIR = REPO_ROOT / "evals"
 RESULTS_DIR = EVALS_DIR / "results"
 
 
+class Chunking(StrEnum):
+    """How the corpus was cut. An eval variable: the uniform arm exists to be compared."""
+
+    CLAUSE = "clause"
+    UNIFORM = "uniform"
+
+
 class Encoder(StrEnum):
     QWEN3 = "qwen3"
     BGE_M3 = "bge-m3"
@@ -45,6 +52,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="IRAG_", extra="ignore")
 
     encoder: Encoder = Encoder.QWEN3
+    #: clause | uniform. Switches the chunk directory and the pgvector collection together,
+    #: so the two corpora can never be read through each other.
+    chunking: Chunking = Chunking.CLAUSE
 
     # --- storage ---
     # No default: credentials live in .env only, so none can be committed by accident.
@@ -64,24 +74,39 @@ class Settings(BaseSettings):
     uniform_overlap_tokens: int = 64
 
     # --- generation (open-weight model on an OpenAI-compatible endpoint) ---
-    # groq | ollama | gemini - see insurance_rag/providers.py.
+    # groq | gemini - see insurance_rag/providers.py.
     generation_provider: str = "groq"
     # Optional so ingestion and retrieval run without it; `chain.py` fails loudly when it is needed.
     groq_api_key: str | None = Field(default=None, description="IRAG_GROQ_API_KEY, from .env")
-    generation_model: str = "openai/gpt-oss-120b"  # Cerebras spells this "gpt-oss-120b"
+    generation_model: str = "openai/gpt-oss-120b"
 
     # --- evaluation: the judge runs off a different provider, for a separate rate limit
     # and to keep a model family from grading its own output. These keys are unprefixed in .env.
     gemini_eval_key: str | None = Field(default=None, validation_alias="GEMINI_API_EVAL_KEY")
+    openrouter_key: str | None = Field(default=None, validation_alias="OPENROUTER_KEY")
     # pydantic-settings reads .env into this object, never into os.environ, so the LangSmith
     # client has to be handed the key rather than left to find it.
     langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
     langsmith_dataset: str = "insurance-rag-golden"
     # See insurance_rag/providers.py for the options. A different provider from the generator
     # means a separate budget; a different family means it cannot favour its own phrasing.
-    judge_provider: str = "groq"
-    judge_model: str = "qwen/qwen3.8-27b"  # Cerebras spells this "qwen-3.8-27b"
-    ollama_api_key: str = "ollama"  # Ollama ignores it; the OpenAI client requires one
+    # Ordered "provider/model" candidates, split on the FIRST slash so Groq's
+    # "qwen/qwen3.8-27b" survives. Failover moves down the list as each budget runs out.
+    #   3.5-flash-lite  15 RPM / 500 RPD  - best judge with capacity for a whole run
+    #   3.1-flash-lite  15 RPM / 500 RPD  - same limits, separate budget
+    #   groq qwen       200k TPD of its own: Groq quotas are per-model, so judging here never
+    #                   touches the budget generation spends on gpt-oss-120b
+    #   openrouter      last, because its free pool returns 429 "Provider returned error"
+    #                   under load - fine as a final fallback, wrong as a dependency
+    # Gemini needs the "models/" prefix on its OpenAI-compatible endpoint. gemma-4-31b-it is
+    # NOT in the chain on Gemini - it returns 500 above max_tokens=16 there, and a 5xx is not
+    # exhaustion, so it would raise and end the run rather than fall through.
+    judge_chain: str = (
+        "gemini/models/gemini-3.5-flash-lite,"
+        "gemini/models/gemini-3.1-flash-lite,"
+        "groq/qwen/qwen3.8-27b,"
+        "openrouter/google/gemma-4-31b-it:free"
+    )
 
     # --- agent ---
     max_agent_steps: int = 6
@@ -89,6 +114,16 @@ class Settings(BaseSettings):
 
     # --- tracing ---
     trace_log_path: Path = DATA_DIR / "traces.jsonl"
+
+    @property
+    def chunks_dir(self) -> Path:
+        return DATA_DIR / ("chunks" if self.chunking is Chunking.CLAUSE else "chunks_uniform")
+
+    @property
+    def collection_name(self) -> str:
+        """The clause-aware name is unchanged, so the frozen index is never touched."""
+        suffix = "" if self.chunking is Chunking.CLAUSE else "_uniform"
+        return f"chunks_{self.encoder}{suffix}"
 
     @property
     def spec(self) -> EncoderSpec:

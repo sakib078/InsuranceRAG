@@ -37,12 +37,16 @@ def embeddings():
 
 @lru_cache(maxsize=1)
 def vector_store():
-    """One collection per encoder over byte-identical chunks - see docs/plan.md, Deviation 8."""
+    """One collection per encoder and chunking - see docs/plan.md, Deviation 8 and Phase 3.
+
+    Cached for the process, so anything switching `settings.chunking` must do it before the
+    first call or it will silently read the wrong corpus.
+    """
     from langchain_postgres import PGVector
 
     return PGVector(
         embeddings=embeddings(),
-        collection_name=f"chunks_{settings.encoder}",
+        collection_name=settings.collection_name,
         connection=connection_string(),
         use_jsonb=True,
     )

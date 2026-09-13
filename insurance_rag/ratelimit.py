@@ -34,11 +34,26 @@ def is_daily_cap(exc: Exception) -> bool:
     return bool(_DAILY_RE.search(str(exc)))
 
 
+#: A provider hiccup, not a verdict. One of these late in a 112-call run would otherwise
+#: discard the whole thing, so they are slept through rather than raised.
+_TRANSIENT_RE = re.compile(r"\b(500|502|503|504)\b")
+
+
+def is_transient(exc: Exception) -> bool:
+    return bool(_TRANSIENT_RE.search(str(exc)))
+
+
 def is_rate_limit(exc: Exception) -> bool:
-    """Retryable limits only: 429 per-minute. Not 413 (too large), not a per-day budget."""
+    """Worth waiting out: a per-minute 429 or a transient 5xx. Never a 413 or a per-day budget."""
     if is_daily_cap(exc):
         return False
-    return "429" in str(exc) or "ratelimit" in type(exc).__name__.lower()
+    return "429" in str(exc) or "ratelimit" in type(exc).__name__.lower() or is_transient(exc)
+
+
+def is_exhausted(exc: Exception) -> bool:
+    """Out of budget on this provider: a daily cap, an unpaid quota, or a 429 that outlived retry."""
+    text = str(exc)
+    return is_daily_cap(exc) or "402" in text or "429" in text
 
 
 def wait_for(exc: Exception, attempt: int) -> float:
