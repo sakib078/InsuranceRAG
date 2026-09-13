@@ -27,6 +27,7 @@ from evals.evaluators import (
 )
 from evals.validate_golden import GOLDEN_PATH, load_records
 from insurance_rag.config import settings
+from insurance_rag.providers import judges_used
 from insurance_rag.retrieval.search import search_with_scores
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -167,6 +168,10 @@ def run_generation(dataset: str, config: str, concurrency: int, pin_k: int | Non
     )
     totals, rows, errored = _tally(results)
     summary = report(totals)
+    served = judges_used()
+    if len(served) > 1:
+        print(f"\njudged by more than one model: {served} - failover moved down the chain "
+              "mid-run, so this row is not a single judge's verdict.")
     _guard(errored, rows)
     return summary
 
@@ -180,7 +185,7 @@ def describe(config: str, pin_k: int | None) -> dict:
         "encoder": str(settings.encoder),
         "retrieval": f"pinned k={pin_k}" if pin_k else "ladder",
         "generation": f"{settings.generation_provider}/{settings.generation_model}",
-        "judge": f"{settings.judge_provider}/{settings.judge_model}",
+        "judge_chain": settings.judge_chain,
     }
 
 
@@ -230,7 +235,7 @@ def main() -> None:
         provenance = {"k": args.k, "encoder": str(settings.encoder)}
     else:
         summary = run_generation(args.dataset, args.config, args.concurrency, args.pin_k)
-        provenance = describe(args.config, args.pin_k)
+        provenance = describe(args.config, args.pin_k) | {"judges_served": judges_used()}
 
     write(
         {
