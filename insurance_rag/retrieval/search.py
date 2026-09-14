@@ -1,24 +1,26 @@
-"""The one retrieval seam. Dense and sparse fused by RRF; rerank lands here in Phase 5."""
+"""The one retrieval seam: dense + sparse, fused by RRF, then reread by the cross-encoder."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from insurance_rag.config import settings
+from insurance_rag.retrieval.rerank import rerank
 from insurance_rag.retrieval.sparse import search_sparse
 from insurance_rag.retrieval.store import to_chunk, vector_store
 from insurance_rag.schema import Chunk, ChunkRole
 
-__all__ = ["search_corpus", "search_with_scores", "search_hybrid", "fuse", "Hit"]
+__all__ = ["search_corpus", "search_ranked", "search_hybrid", "search_with_scores", "fuse", "Hit"]
 
 
 @dataclass(frozen=True, slots=True)
 class Hit:
-    """A fused result. `channels` is kept because "found by both" is a signal in its own right."""
+    """A ranked result. `channels` is kept because "found by both" is a signal in its own right."""
 
     chunk: Chunk
     channels: tuple[str, ...]
-    score: float
+    score: float  # reciprocal rank fusion
+    rerank_score: float | None = None  # P(relevant) from the cross-encoder
 
 
 def _filter(role_filter, doc_filter) -> dict | None:
@@ -71,16 +73,32 @@ def search_hybrid(
     doc_filter: list[str] | None = None,
     k: int = settings.fusion_top_k,
 ) -> list[Hit]:
-    """Both channels at their own depth, fused down to `k`. Phase 5 reranks what this returns."""
+    """The candidate pool, before reranking. Each channel searches at its own depth."""
     dense = search_with_scores(
         query, role_filter=role_filter, doc_filter=doc_filter, k=settings.dense_top_k
     )
     sparse = search_sparse(
         query, role_filter=role_filter, doc_filter=doc_filter, k=settings.sparse_top_k
     )
-    return fuse(
-        {"dense": [c for c, _ in dense], "sparse": [c for c, _ in sparse]}, k=k
+    return fuse({"dense": [c for c, _ in dense], "sparse": [c for c, _ in sparse]}, k=k)
+
+
+def search_ranked(
+    query: str,
+    *,
+    role_filter: list[ChunkRole] | None = None,
+    doc_filter: list[str] | None = None,
+    k: int = settings.rerank_top_k,
+) -> list[Hit]:
+    """The shipped pipeline. Fusion decides the pool; the cross-encoder decides the order."""
+    pool = search_hybrid(
+        query, role_filter=role_filter, doc_filter=doc_filter, k=settings.fusion_top_k
     )
+    by_id = {hit.chunk.chunk_id: hit for hit in pool}
+    return [
+        replace(by_id[chunk.chunk_id], rerank_score=score)
+        for chunk, score in rerank(query, [hit.chunk for hit in pool], k=k)
+    ]
 
 
 def search_corpus(
@@ -89,14 +107,9 @@ def search_corpus(
     role_filter: list[ChunkRole] | None = None,
     doc_filter: list[str] | None = None,
     k: int = settings.rerank_top_k,
-    hybrid: bool = True,
 ) -> list[Chunk]:
     """Chunks, never Documents - generation and the future agent share this one type."""
-    if not hybrid:
-        return [c for c, _ in search_with_scores(
-            query, role_filter=role_filter, doc_filter=doc_filter, k=k
-        )]
-    return [hit.chunk for hit in search_hybrid(
+    return [hit.chunk for hit in search_ranked(
         query, role_filter=role_filter, doc_filter=doc_filter, k=k
     )]
 
@@ -110,14 +123,17 @@ def main() -> None:
     parser.add_argument("-k", type=int, default=settings.rerank_top_k)
     parser.add_argument("--role", action="append", type=ChunkRole, choices=list(ChunkRole))
     parser.add_argument("--doc", action="append", help="restrict to these doc_ids")
-    parser.add_argument("--channel", choices=("hybrid", "dense", "sparse"), default="hybrid")
+    parser.add_argument("--stage", choices=("pipeline", "fused", "dense", "sparse"),
+                        default="pipeline", help="inspect one stage instead of the whole pipeline")
     parser.add_argument("--text", action="store_true", help="print the chunk body too")
     args = parser.parse_args()
 
     common = {"role_filter": args.role, "doc_filter": args.doc, "k": args.k}
-    if args.channel == "hybrid":
+    if args.stage == "pipeline":
+        rows = [(h.chunk, h.rerank_score, "+".join(h.channels)) for h in search_ranked(args.query, **common)]
+    elif args.stage == "fused":
         rows = [(h.chunk, h.score, "+".join(h.channels)) for h in search_hybrid(args.query, **common)]
-    elif args.channel == "dense":
+    elif args.stage == "dense":
         rows = [(c, s, "dense") for c, s in search_with_scores(args.query, **common)]
     else:
         rows = [(c, s, "sparse") for c, s in search_sparse(args.query, **common)]
