@@ -125,8 +125,14 @@ def main() -> None:
     parser.add_argument("--doc", action="append", help="restrict to these doc_ids")
     parser.add_argument("--stage", choices=("pipeline", "fused", "dense", "sparse"),
                         default="pipeline", help="inspect one stage instead of the whole pipeline")
+    parser.add_argument("--reranker", choices=("family", "gte"), help="override the configured arm")
     parser.add_argument("--text", action="store_true", help="print the chunk body too")
     args = parser.parse_args()
+
+    if args.reranker:
+        from insurance_rag.config import Reranker
+
+        settings.reranker = Reranker(args.reranker)
 
     common = {"role_filter": args.role, "doc_filter": args.doc, "k": args.k}
     if args.stage == "pipeline":
