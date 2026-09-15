@@ -29,7 +29,7 @@ from evals.validate_golden import GOLDEN_PATH, load_records
 from evals import evaluators
 from insurance_rag.config import Chunking, settings
 from insurance_rag.providers import judges_used
-from insurance_rag.retrieval.search import search_with_scores
+from insurance_rag.retrieval.search import search_corpus
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 HISTORY_FILE = "history.jsonl"
@@ -47,15 +47,21 @@ METRIC_ORDER = (
 #: the surviving records are no longer the golden set, and the row would be a different experiment.
 ERROR_TOLERANCE = 0.10
 
+#: Recorded on every row, because "recall@5" means nothing without the pipeline that produced it.
+RETRIEVAL_SHAPE = (
+    f"dense {settings.dense_top_k} + sparse {settings.sparse_top_k} -> RRF "
+    f"{settings.fusion_top_k} -> {settings.cross_encoder_model}"
+)
+
 
 # --- targets ----------------------------------------------------------------------------------
 
 def retrieval_target(question: str, k: int) -> dict:
-    """What the pipeline retrieves, in rank order. No generation, so no API call."""
-    hits = search_with_scores(question, k=k)
+    """What the shipped pipeline retrieves, in rank order. No generation, so no API call."""
+    chunks = search_corpus(question, k=k)
     return {
-        "retrieved_locators": [chunk.locator for chunk, _ in hits],
-        "retrieved_text": [chunk.text for chunk, _ in hits],
+        "retrieved_locators": [chunk.locator for chunk in chunks],
+        "retrieved_text": [chunk.text for chunk in chunks],
     }
 
 
@@ -243,7 +249,7 @@ def main() -> None:
     if retrieval:
         summary = run_retrieval(records, args.k, args.misses)
         provenance = {"k": args.k, "encoder": str(settings.encoder),
-                      "chunking": args.chunking}
+                      "chunking": args.chunking, "retrieval": RETRIEVAL_SHAPE}
         if args.chunking == "uniform":
             provenance["coverage_threshold"] = args.coverage
     else:

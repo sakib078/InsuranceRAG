@@ -511,6 +511,107 @@ The fix for `"s. 31"` and for the disjoint-paraphrase result.
 - `evals/results/hybrid_rrf.json` — recall up on both slices, or the technique did not work and
   that is the finding.
 
+<details>
+<summary><b>Phase 4 as built — the full build plan</b></summary>
+
+Eval is deliberately absent here; the numbers land in Phase 5's single generation row.
+
+### Why this phase exists, in numbers
+
+Two failures measured in iteration 1, both lexical rather than semantic:
+
+- `"s. 31"` returns a top-5 cosine spread of **0.006** — the embedding has no opinion.
+- Two paraphrases of one question returned **disjoint** evidence, and neither surfaced s. 31.
+
+And from the baseline diagnosis: of 79 gold locators, **21 sit at rank 6–20** and **15 are
+absent from the top 50 entirely**. Those 15 are numbered subsections of the Insurance Act and
+OAP 1 — exactly the shape a lexical channel finds and a dense one cannot. The 21 are a
+reranker's job (Phase 5); the 15 are this phase's.
+
+### Step 4.0 — Tokenisation, settled before the migration
+
+Postgres's `english` config stems, folds case and drops one-letter tokens — `s` is a stopword.
+Whether `s. 31` and `31(1)(a)` survive it decides what the index can find:
+
+```sql
+SELECT to_tsvector('english', 'Insurance Act s. 31(1)(a) benefits not payable');
+SELECT to_tsvector('simple',  'Insurance Act s. 31(1)(a) benefits not payable');
+```
+
+Rather than gate the build on that answer, take the shape that is correct under **either**
+outcome — two fields, weighted:
+
+```sql
+setweight(to_tsvector('simple',  coalesce(cmetadata->>'locator','')), 'A') ||
+setweight(to_tsvector('english', document), 'B')
+```
+
+The locator is indexed `simple` (no stemming, nothing dropped) at weight **A**, because a
+citation query is aiming at the locator and nothing else; the body keeps `english` stemming at
+weight **B** so natural-language queries still match. This is a superset of the single-field
+version — if `english` turns out to preserve clause numbers, the locator field only sharpens
+them further.
+
+Both halves must be `IMMUTABLE` to sit in a generated column. `to_tsvector('english', …)` with
+the config as a literal is immutable; **the one-argument form is only `STABLE` and Postgres
+will reject it.**
+
+### Step 4.1 — `scripts/migrate_fts.py`
+
+Idempotent, on `langchain_pg_embedding`:
+
+```sql
+ALTER TABLE langchain_pg_embedding
+  ADD COLUMN IF NOT EXISTS fts tsvector GENERATED ALWAYS AS (<the 4.0 expression>) STORED;
+CREATE INDEX IF NOT EXISTS langchain_pg_embedding_fts_idx
+  ON langchain_pg_embedding USING GIN (fts);
+```
+
+**Generated, not trigger-maintained.** Re-indexing a chunk rewrites its tsvector as part of the
+same write, so the full-text index cannot drift from `document` — there is no state to rebuild
+and no migration to re-run after an ingest.
+
+**Why GIN.** A GIN index inverts the table: instead of row → content it stores lexeme → the
+rows containing it, so a lookup costs what the term is rare, not what the table is large.
+Unlike an ANN vector index it is **exact** — pure speed, no recall traded away — which is why
+adding it changes no measured number. Writes are slower; irrelevant for a corpus written once
+per re-ingest and read constantly.
+
+### Step 4.2 — `insurance_rag/retrieval/sparse.py`
+
+`search_sparse(query, *, role_filter, doc_filter, k=settings.sparse_top_k)`, `ts_rank_cd` over
+`fts`, returning the same `(Chunk, score)` shape the dense side returns.
+
+- **Every query filters on `collection_id`.** All collections share one heap; a sparse query
+  that forgets this reads the uniform arm's rows into the clause-aware result set. Same class
+  of mistake as the id collision that overwrote `chunks_qwen3`.
+- `document` and `cmetadata` come back in the same statement and rebuild through `to_chunk`,
+  so fusion needs no second round trip.
+- Terms are **OR-ed, not AND-ed.** `plainto_tsquery` conjoins, which makes a six-word question
+  match nothing; ranking wants "how many of these terms, how densely", not "all of them".
+
+### Step 4.3 — RRF inside `search_corpus`
+
+```
+score(chunk) = Σ over channels  1 / (rrf_k + rank_in_channel)        rrf_k = 60
+```
+
+Rank-based, so cosine distance and `ts_rank_cd` — two scales with no common unit — never have
+to be calibrated against each other. That is the whole reason RRF is the right fusion here and
+a weighted score sum is not.
+
+- dense at `dense_top_k` (50), sparse at `sparse_top_k` (20), fused down to `fusion_top_k` (20).
+- **Channel labels survive fusion** — `dense` / `sparse` / `both`. Phase 5's reranker and
+  Phase 7's agent both want them, and "found by both channels" is the strongest single
+  relevance signal this pipeline has before a cross-encoder exists.
+- `search_with_scores` stays dense-only, so the k=50 rank diagnosis tooling keeps working and
+  the recorded baseline stays reproducible.
+
+No new config keys: `sparse_top_k`, `fusion_top_k` and `rrf_k` have existed and gone unused
+since iteration 1. No new dependencies — psycopg is already installed.
+
+</details>
+
 ---
 
 ## Phase 5 — Cross-encoder rerank
@@ -694,3 +795,42 @@ Three of its ideas are worth taking without the corpus, and two are already abov
 retrieval labels (Phase 4), authority as retrieval metadata (partly present as `status` /
 `is_official`), and the structured `grant → exclusion → exception → regulation` answer bundle
 (Phase 7's output contract).
+
+---
+
+## Deferred — an ANN vector index, and the trigger for adding one
+
+pgvector offers two index types. **Both are approximate**, despite IVFFlat often being
+described as exact — "Flat" means full vectors are stored inside each cluster, not that the
+search is exhaustive. IVFFlat partitions vectors by k-means and probes only the nearest
+`probes` clusters; a true neighbour in an unprobed cluster is simply never seen.
+
+| | How it searches | Build | Recall | Query cost |
+|---|---|---|---|---|
+| **None — today** | sequential scan, every vector compared | — | **100%** | O(n) |
+| **IVFFlat** | k-means clusters, probe the nearest few | fast; needs data present to train | tunable via `probes`, ~90–98% | O(n / lists × probes) |
+| **HNSW** | multi-layer proximity graph, greedy descent | slow, memory-hungry | best at equal speed, ~95–99% | ~O(log n) |
+
+**Neither is being added now**, for three reasons:
+
+1. **It buys latency we do not need, with recall we cannot spare.** 3,896 chunks × 1024 dims ×
+   4 bytes ≈ **16 MB** — it fits in shared buffers and a sequential scan over it is
+   single-digit milliseconds, exactly correct. Every point of ANN recall lost is a gold clause
+   that silently stops being retrievable, and the measured headline of this project is that
+   retrieval failure causes 8 of 10 wrong answers.
+2. **It would confound the baseline.** 0.737 was measured under exact search. Adding a lossy
+   index during Phase 4 mixes two changes into one delta with no way to attribute either.
+3. **IVFFlat is degenerate at this size.** The usual heuristic `lists ≈ rows / 1000` gives
+   **4 clusters** for this corpus; four centroids over 3,896 legal provisions is not a
+   partition of anything.
+
+**When this stops being deferred.** Exact search is O(n), so the trigger is corpus size, not
+time. Around **10⁵ chunks** a scan starts showing up next to the encoder call; past **10⁶** it
+dominates. The realistic path there is the national corpus excluded above, or ingesting LAT/AABS
+decisions. At that point: `CREATE INDEX … USING hnsw (embedding vector_cosine_ops)`, HNSW over
+IVFFlat because it does not need retraining as the corpus grows, then **re-run the retrieval
+suite and record the recall lost** — an ANN index is a measurable regression, and shipping it
+unmeasured would undo the point of the harness.
+
+Until then the README says so plainly: no ANN index, because at this size exact search is
+cheaper than the recall would be.
