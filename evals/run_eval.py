@@ -27,7 +27,7 @@ from evals.evaluators import (
 )
 from evals.validate_golden import GOLDEN_PATH, load_records
 from evals import evaluators
-from insurance_rag.config import Chunking, settings
+from insurance_rag.config import Chunking, Reranker, settings
 from insurance_rag.providers import judges_used
 from insurance_rag.retrieval.search import search_corpus
 
@@ -47,11 +47,15 @@ METRIC_ORDER = (
 #: the surviving records are no longer the golden set, and the row would be a different experiment.
 ERROR_TOLERANCE = 0.10
 
-#: Recorded on every row, because "recall@5" means nothing without the pipeline that produced it.
-RETRIEVAL_SHAPE = (
-    f"dense {settings.dense_top_k} + sparse {settings.sparse_top_k} -> RRF "
-    f"{settings.fusion_top_k} -> {settings.cross_encoder_model}"
-)
+def retrieval_shape() -> str:
+    """Recorded on every row: "recall@5" means nothing without the pipeline that produced it.
+
+    Read after the flags are applied, never at import - the reranker is chosen per run.
+    """
+    return (
+        f"dense {settings.dense_top_k} + sparse {settings.sparse_top_k} -> RRF "
+        f"{settings.fusion_top_k} -> {settings.cross_encoder_model}"
+    )
 
 
 # --- targets ----------------------------------------------------------------------------------
@@ -190,7 +194,7 @@ def describe(config: str, pin_k: int | None) -> dict:
     return {
         "config": config,
         "encoder": str(settings.encoder),
-        "retrieval": f"pinned k={pin_k}" if pin_k else "ladder",
+        "retrieval": f"{retrieval_shape()}, {'pinned k=' + str(pin_k) if pin_k else 'ladder'}",
         "generation": f"{settings.generation_provider}/{settings.generation_model}",
         "judge_chain": settings.judge_chain,
     }
@@ -224,6 +228,8 @@ def parse_args() -> argparse.Namespace:
                         help="generation: fix k and skip the retry ladder, ~40%% fewer tokens")
     parser.add_argument("--misses", action="store_true", help="list the records that scored 0")
     parser.add_argument("--chunking", choices=("clause", "uniform"), default="clause")
+    parser.add_argument("--reranker", choices=("family", "gte"), default="family",
+                        help="which cross-encoder orders the fused pool")
     parser.add_argument("--coverage", type=float, default=0.5,
                         help="uniform only: share of a provision a window must hold to count")
     return parser.parse_args()
@@ -235,6 +241,7 @@ def main() -> None:
     # Both the chunk directory and the pgvector collection are cached per process, so the
     # corpus has to be chosen before anything reads either.
     settings.chunking = Chunking(args.chunking)
+    settings.reranker = Reranker(args.reranker)
     evaluators.COVERAGE = args.coverage
 
     records = load_records(GOLDEN_PATH)
@@ -249,7 +256,7 @@ def main() -> None:
     if retrieval:
         summary = run_retrieval(records, args.k, args.misses)
         provenance = {"k": args.k, "encoder": str(settings.encoder),
-                      "chunking": args.chunking, "retrieval": RETRIEVAL_SHAPE}
+                      "chunking": args.chunking, "retrieval": retrieval_shape()}
         if args.chunking == "uniform":
             provenance["coverage_threshold"] = args.coverage
     else:

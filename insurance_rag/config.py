@@ -40,11 +40,37 @@ class EncoderSpec:
     bi_encoder: str
     cross_encoder: str
     dim: int
+    backend: str  # how the reranker is scored: causal | sequence
 
 
 ENCODERS: dict[Encoder, EncoderSpec] = {
-    Encoder.QWEN3: EncoderSpec("Qwen/Qwen3-Embedding-0.6B", "Qwen/Qwen3-Reranker-0.6B", 1024),
-    Encoder.BGE_M3: EncoderSpec("BAAI/bge-m3", "BAAI/bge-reranker-v2-m3", 1024),
+    Encoder.QWEN3: EncoderSpec(
+        "Qwen/Qwen3-Embedding-0.6B", "Qwen/Qwen3-Reranker-0.6B", 1024, "causal"
+    ),
+    Encoder.BGE_M3: EncoderSpec("BAAI/bge-m3", "BAAI/bge-reranker-v2-m3", 1024, "sequence"),
+}
+
+
+class Reranker(StrEnum):
+    """Which cross-encoder orders the fused pool. An eval variable, like `Chunking`."""
+
+    FAMILY = "family"  # the bi-encoder's own family, per ENCODERS - the locked default
+    GTE = "gte"
+
+
+@dataclass(frozen=True)
+class RerankerSpec:
+    """`backend` picks the scoring path: a yes/no logit pair, or a classifier head."""
+
+    model: str
+    backend: str  # causal | sequence
+    params: str
+
+
+#: The small arm is 4x smaller and still 8K-context, so the comparison is size, not truncation -
+#: a 512-context reranker would cut an 800-token provision and measure that instead.
+RERANKERS: dict[Reranker, RerankerSpec] = {
+    Reranker.GTE: RerankerSpec("Alibaba-NLP/gte-reranker-modernbert-base", "sequence", "150M"),
 }
 
 
@@ -55,6 +81,8 @@ class Settings(BaseSettings):
     #: clause | uniform. Switches the chunk directory and the pgvector collection together,
     #: so the two corpora can never be read through each other.
     chunking: Chunking = Chunking.CLAUSE
+    #: family | gte. Only the cross-encoder changes, so a row swap measures model size alone.
+    reranker: Reranker = Reranker.FAMILY
 
     # --- storage ---
     # No default: credentials live in .env only, so none can be committed by accident.
@@ -134,8 +162,15 @@ class Settings(BaseSettings):
         return self.spec.bi_encoder
 
     @property
+    def reranker_spec(self) -> RerankerSpec:
+        """`family` keeps Deviation 6; any other arm breaks it deliberately, to be measured."""
+        if self.reranker is Reranker.FAMILY:
+            return RerankerSpec(self.spec.cross_encoder, self.spec.backend, "0.6B")
+        return RERANKERS[self.reranker]
+
+    @property
     def cross_encoder_model(self) -> str:
-        return self.spec.cross_encoder
+        return self.reranker_spec.model
 
     @property
     def embedding_dim(self) -> int:

@@ -37,22 +37,37 @@ MAX_LENGTH = 1024
 BATCH_SIZE = 4
 
 
+def _device_dtype():
+    """fp16 is a GPU format; asking a CPU for it is slower than fp32, not faster."""
+    import torch
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return device, (torch.float16 if device == "cuda" else torch.float32)
+
+
 @lru_cache(maxsize=1)
 def _model():
-    """Tokenizer, model, and the two token ids the score is read from. Loaded once per process."""
+    """Tokenizer and model for whichever arm is configured. Loaded once per process."""
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
 
-    name = settings.cross_encoder_model
-    # Left padding: the score is the logit at the final position, which must be a real token.
-    tokenizer = AutoTokenizer.from_pretrained(name, padding_side="left")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(name, torch_dtype=dtype).to(device).eval()
-    return tokenizer, model, tokenizer.convert_tokens_to_ids("no"), tokenizer.convert_tokens_to_ids("yes")
+    spec = settings.reranker_spec
+    device, dtype = _device_dtype()
+
+    if spec.backend == "causal":
+        # Left padding: the score is the logit at the final position, which must be a real token.
+        tokenizer = AutoTokenizer.from_pretrained(spec.model, padding_side="left")
+        model = AutoModelForCausalLM.from_pretrained(spec.model, dtype=dtype)
+        ids = (tokenizer.convert_tokens_to_ids("no"), tokenizer.convert_tokens_to_ids("yes"))
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(spec.model)
+        model = AutoModelForSequenceClassification.from_pretrained(spec.model, dtype=dtype)
+        ids = None
+
+    return tokenizer, model.to(device).eval(), ids
 
 
-def _encode(tokenizer, query: str, texts: list[str]):
+def _encode_causal(tokenizer, query: str, texts: list[str]):
     """Truncate the document, never the scaffolding - the yes/no cue has to survive."""
     prefix = tokenizer.encode(_PREFIX, add_special_tokens=False)
     suffix = tokenizer.encode(_SUFFIX, add_special_tokens=False)
@@ -68,18 +83,35 @@ def _encode(tokenizer, query: str, texts: list[str]):
 
 
 def score_pairs(query: str, texts: list[str]) -> list[float]:
-    """P(yes) per pair, in order. A calibrated probability - which cosine distance never was."""
+    """P(relevant) per pair, in order. A calibrated probability - which cosine distance was not."""
     import torch
 
-    tokenizer, model, no_id, yes_id = _model()
+    tokenizer, model, ids = _model()
+    causal = ids is not None
     scores: list[float] = []
+
     for start in range(0, len(texts), BATCH_SIZE):
-        batch = _encode(tokenizer, query, texts[start : start + BATCH_SIZE])
+        window = texts[start : start + BATCH_SIZE]
+        if causal:
+            batch = _encode_causal(tokenizer, query, window)
+        else:
+            batch = tokenizer(
+                [query] * len(window), window, padding=True, truncation="only_second",
+                max_length=MAX_LENGTH, return_tensors="pt",
+            )
         batch = {key: value.to(model.device) for key, value in batch.items()}
+
         with torch.no_grad():
-            logits = model(**batch).logits[:, -1, :]
-        pair = torch.stack([logits[:, no_id], logits[:, yes_id]], dim=1)
-        scores.extend(pair.float().log_softmax(dim=1)[:, 1].exp().tolist())
+            logits = model(**batch).logits
+
+        if causal:
+            # The yes/no logits at the final position, read as a two-way choice.
+            no_id, yes_id = ids
+            pair = torch.stack([logits[:, -1, no_id], logits[:, -1, yes_id]], dim=1)
+            scores.extend(pair.float().log_softmax(dim=1)[:, 1].exp().tolist())
+        else:
+            # One regression head, so the probability is a plain sigmoid over it.
+            scores.extend(logits[:, 0].float().sigmoid().tolist())
     return scores
 
 
