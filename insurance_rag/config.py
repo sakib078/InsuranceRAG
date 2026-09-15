@@ -52,7 +52,11 @@ ENCODERS: dict[Encoder, EncoderSpec] = {
 
 
 class Reranker(StrEnum):
-    """Which cross-encoder orders the fused pool. An eval variable, like `Chunking`."""
+    """Which cross-encoder orders the fused pool. Read only by the parked `artifacts/rerank.py`.
+
+    Kept wired to config so the arm can be revived without re-deriving it; nothing on the
+    import path reads it today.
+    """
 
     FAMILY = "family"  # the bi-encoder's own family, per ENCODERS - the locked default
     GTE = "gte"
@@ -94,6 +98,13 @@ class Settings(BaseSettings):
     fusion_top_k: int = 20
     rerank_top_k: int = 5
     rrf_k: int = 60  # reciprocal rank fusion smoothing constant
+    #: Per-channel RRF weights. Equal weighting let sparse *inject* candidates - a junk hit at
+    #: sparse rank 1 ties dense rank 1 at any `rrf_k`, and with 5 slots that is round-robin.
+    #: Below ~0.5 sparse can only *promote* what dense already found, which is all an unreliable
+    #: channel should be trusted to do. Measured: equal weights cost 0.737 -> 0.632 single and
+    #: 0.450 -> 0.200 exclusion.
+    dense_weight: float = 1.0
+    sparse_weight: float = 0.7
 
     # --- chunking, measured against the reference tokenizer ---
     min_chunk_tokens: int = 400

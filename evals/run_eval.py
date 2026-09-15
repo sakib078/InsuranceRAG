@@ -25,9 +25,10 @@ from evals.evaluators import (
     recall_multi,
     recall_single,
 )
+
 from evals.validate_golden import GOLDEN_PATH, load_records
 from evals import evaluators
-from insurance_rag.config import Chunking, Reranker, settings
+from insurance_rag.config import Chunking, settings
 from insurance_rag.providers import judges_used
 from insurance_rag.retrieval.search import search_corpus
 
@@ -38,8 +39,10 @@ LABEL_FIELDS = ("id", "hop", "gold_locators", "exclusion_locators", "answerable"
 #: Citation accuracy needs an answer, so it only joins the generation suite.
 RETRIEVAL_EVALUATORS = (recall_single, recall_multi, exclusion_recall_eval)
 CUSTOM_EVALUATORS = (*RETRIEVAL_EVALUATORS, citation_accuracy_eval)
+#: Printed in this order. `{k}` is the depth the row was scored at, so a recall@20 row orders
+#: the same way a recall@5 one does.
 METRIC_ORDER = (
-    "recall@5_single", "recall@5_multi", "exclusion_recall", "citation_accuracy",
+    "recall@{k}_single", "recall@{k}_multi", "exclusion_recall", "citation_accuracy",
     "correctness", "relevance", "groundedness", "retrieval_relevance",
 )
 
@@ -48,13 +51,11 @@ METRIC_ORDER = (
 ERROR_TOLERANCE = 0.10
 
 def retrieval_shape() -> str:
-    """Recorded on every row: "recall@5" means nothing without the pipeline that produced it.
-
-    Read after the flags are applied, never at import - the reranker is chosen per run.
-    """
+    """Recorded on every row: "recall@5" means nothing without the pipeline that produced it."""
     return (
-        f"dense {settings.dense_top_k} + sparse {settings.sparse_top_k} -> RRF "
-        f"{settings.fusion_top_k} -> {settings.cross_encoder_model}"
+        f"dense {settings.dense_top_k} (w={settings.dense_weight}) + "
+        f"sparse {settings.sparse_top_k} (w={settings.sparse_weight}) -> "
+        f"RRF k={settings.rrf_k} (no rerank - see artifacts/rerank.py)"
     )
 
 
@@ -92,26 +93,28 @@ def labels_of(record: dict) -> dict:
     return {field: record[field] for field in LABEL_FIELDS}
 
 
-def report(totals: dict[str, list[float]], misses: list | None = None) -> dict:
+def report(totals: dict[str, list[float]], k: int, misses: dict | None = None) -> dict:
     """Print the row and return the scores worth recording."""
     print(f"\n{'metric':<22}{'score':>8}{'n':>6}")
     summary = {}
-    for key in METRIC_ORDER:
+    for name in METRIC_ORDER:
+        key = name.format(k=k)
         values = totals.get(key, [])
         if values:
             summary[key] = sum(values) / len(values)
             print(f"{key:<22}{summary[key]:>8.3f}{len(values):>6}")
     if misses:
         print("\nscored 0:")
-        for key, record_id, question in misses:
-            print(f"  {key:<20} {record_id}  {question[:66]}")
+        for key, ids in misses.items():
+            print(f"  {key:<20} {' '.join(ids)}")
     return summary
 
 
-def run_retrieval(records: list[dict], k: int, show_misses: bool) -> dict:
+def run_retrieval(records: list[dict], k: int, show_misses: bool) -> tuple[dict, dict]:
     """Offline: query pgvector once per record and score the custom retrieval evaluators."""
+    evaluators.DEPTH = k  # before the first score, so the metric keys carry the right depth
     totals: dict[str, list[float]] = defaultdict(list)
-    misses: list[tuple[str, str, str]] = []
+    misses: dict[str, list[str]] = defaultdict(list)
     for record in records:
         outputs = retrieval_target(record["question"], k)
         for evaluator in RETRIEVAL_EVALUATORS:
@@ -120,8 +123,8 @@ def run_retrieval(records: list[dict], k: int, show_misses: bool) -> dict:
                 continue
             totals[verdict["key"]].append(verdict["score"])
             if verdict["score"] == 0.0:
-                misses.append((verdict["key"], record["id"], record["question"]))
-    return report(totals, misses if show_misses else None)
+                misses[verdict["key"]].append(record["id"])
+    return report(totals, k, dict(misses) if show_misses else None), dict(misses)
 
 
 def _errored(row: dict) -> bool:
@@ -178,7 +181,7 @@ def run_generation(dataset: str, config: str, concurrency: int, pin_k: int | Non
         metadata=describe(config, pin_k),
     )
     totals, rows, errored = _tally(results)
-    summary = report(totals)
+    summary = report(totals, settings.rerank_top_k)
     served = judges_used()
     if len(served) > 1:
         print(f"\njudged by more than one model: {served} - failover moved down the chain "
@@ -228,8 +231,6 @@ def parse_args() -> argparse.Namespace:
                         help="generation: fix k and skip the retry ladder, ~40%% fewer tokens")
     parser.add_argument("--misses", action="store_true", help="list the records that scored 0")
     parser.add_argument("--chunking", choices=("clause", "uniform"), default="clause")
-    parser.add_argument("--reranker", choices=("family", "gte"), default="family",
-                        help="which cross-encoder orders the fused pool")
     parser.add_argument("--coverage", type=float, default=0.5,
                         help="uniform only: share of a provision a window must hold to count")
     return parser.parse_args()
@@ -241,7 +242,6 @@ def main() -> None:
     # Both the chunk directory and the pgvector collection are cached per process, so the
     # corpus has to be chosen before anything reads either.
     settings.chunking = Chunking(args.chunking)
-    settings.reranker = Reranker(args.reranker)
     evaluators.COVERAGE = args.coverage
 
     records = load_records(GOLDEN_PATH)
@@ -253,8 +253,9 @@ def main() -> None:
         width = f"pinned k={args.pin_k}" if args.pin_k else "the retry ladder"
     print(f"{args.config} [{args.suite}]: {len(records)} records at {width}")
 
+    misses: dict[str, list[str]] = {}
     if retrieval:
-        summary = run_retrieval(records, args.k, args.misses)
+        summary, misses = run_retrieval(records, args.k, args.misses)
         provenance = {"k": args.k, "encoder": str(settings.encoder),
                       "chunking": args.chunking, "retrieval": retrieval_shape()}
         if args.chunking == "uniform":
@@ -271,6 +272,9 @@ def main() -> None:
             **provenance,
             "records": len(records),
             "scores": summary,
+            # Always recorded, never gated on --misses: which records failed is what makes two
+            # rows diffable, and it cannot be recovered from a mean after the fact.
+            "misses": misses,
         },
         args.config,
         args.suite,

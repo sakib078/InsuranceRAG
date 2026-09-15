@@ -20,6 +20,11 @@ CHUNKS_DIR = DATA_DIR / "chunks"
 #: Set by run_eval before the first score; see evals/uniform.py for why 0.5.
 COVERAGE = 0.5
 
+#: Rank depth every recall metric is scored at, and the number in its key. Set by run_eval from
+#: `-k` before the first score. Read at call time, never bound as a default argument, or a row
+#: run at another depth would silently be scored at this one.
+DEPTH = settings.rerank_top_k
+
 
 def _matches(gold: str, locator: str) -> bool:
     """A gold label also matches the ` #2` sub-chunks an oversized provision was split into."""
@@ -120,27 +125,31 @@ def _ran(outputs: dict, *keys: str) -> bool:
 
 def recall_single(outputs: dict, reference_outputs: dict) -> dict:
     labels = _labels(reference_outputs)
+    key = f"recall@{DEPTH}_single"
     if labels.get("hop") != "single" or not _ran(outputs, "retrieved_locators"):
-        return _skip("recall@5_single")
-    score = recall(outputs["retrieved_locators"], labels.get("gold_locators", []))
-    return {"key": "recall@5_single", "score": score}
+        return _skip(key)
+    score = recall(outputs["retrieved_locators"], labels.get("gold_locators", []), k=DEPTH)
+    return {"key": key, "score": score}
 
 
 def recall_multi(outputs: dict, reference_outputs: dict) -> dict:
     labels = _labels(reference_outputs)
+    key = f"recall@{DEPTH}_multi"
     if labels.get("hop") != "multi" or not _ran(outputs, "retrieved_locators"):
-        return _skip("recall@5_multi")
+        return _skip(key)
     score = recall(
-        outputs["retrieved_locators"], labels.get("gold_locators", []), require_all=True
+        outputs["retrieved_locators"], labels.get("gold_locators", []), k=DEPTH, require_all=True
     )
-    return {"key": "recall@5_multi", "score": score}
+    return {"key": key, "score": score}
 
 
 def exclusion_recall_eval(outputs: dict, reference_outputs: dict) -> dict:
     labels = _labels(reference_outputs)
     if not _ran(outputs, "retrieved_locators"):
         return _skip("exclusion_recall")
-    score = exclusion_recall(outputs["retrieved_locators"], labels.get("exclusion_locators", []))
+    score = exclusion_recall(
+        outputs["retrieved_locators"], labels.get("exclusion_locators", []), k=DEPTH
+    )
     return {"key": "exclusion_recall", "score": score}
 
 

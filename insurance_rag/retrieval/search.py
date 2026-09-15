@@ -1,26 +1,29 @@
-"""The one retrieval seam: dense + sparse, fused by RRF, then reread by the cross-encoder."""
+"""The one retrieval seam: dense + sparse, fused by RRF.
+
+A cross-encoder rerank sat here and was removed - it lost on every metric and cost 124s a
+query. The code and its numbers are in `artifacts/rerank.py`; the pool this returns is what it
+would read if it comes back.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from insurance_rag.config import settings
-from insurance_rag.retrieval.rerank import rerank
 from insurance_rag.retrieval.sparse import search_sparse
 from insurance_rag.retrieval.store import to_chunk, vector_store
 from insurance_rag.schema import Chunk, ChunkRole
 
-__all__ = ["search_corpus", "search_ranked", "search_hybrid", "search_with_scores", "fuse", "Hit"]
+__all__ = ["search_corpus", "search_hybrid", "search_with_scores", "fuse", "Hit"]
 
 
 @dataclass(frozen=True, slots=True)
 class Hit:
-    """A ranked result. `channels` is kept because "found by both" is a signal in its own right."""
+    """A fused result. `channels` is kept because "found by both" is a signal in its own right."""
 
     chunk: Chunk
     channels: tuple[str, ...]
     score: float  # reciprocal rank fusion
-    rerank_score: float | None = None  # P(relevant) from the cross-encoder
 
 
 def _filter(role_filter, doc_filter) -> dict | None:
@@ -49,16 +52,24 @@ def search_with_scores(
     return [(to_chunk(doc), score) for doc, score in hits]
 
 
-def fuse(channels: dict[str, list[Chunk]], *, k: int) -> list[Hit]:
-    """Reciprocal rank fusion: position only, so two incomparable score scales never meet."""
+def fuse(
+    channels: dict[str, list[Chunk]], *, k: int, weights: dict[str, float] | None = None
+) -> list[Hit]:
+    """Weighted reciprocal rank fusion: position only, so two score scales never have to meet.
+
+    `sum(w / (rrf_k + rank))` over the channels that found a chunk. Weighting is what keeps a
+    weak channel advisory - see `settings.sparse_weight`.
+    """
+    weights = weights or {}
     scores: dict[str, float] = {}
     found: dict[str, list[str]] = {}
     chunks: dict[str, Chunk] = {}
 
     for channel, hits in channels.items():
+        weight = weights.get(channel, 1.0)
         for rank, chunk in enumerate(hits, start=1):
             cid = chunk.chunk_id
-            scores[cid] = scores.get(cid, 0.0) + 1.0 / (settings.rrf_k + rank)
+            scores[cid] = scores.get(cid, 0.0) + weight / (settings.rrf_k + rank)
             found.setdefault(cid, []).append(channel)
             chunks.setdefault(cid, chunk)
 
@@ -73,32 +84,20 @@ def search_hybrid(
     doc_filter: list[str] | None = None,
     k: int = settings.fusion_top_k,
 ) -> list[Hit]:
-    """The candidate pool, before reranking. Each channel searches at its own depth."""
+    """The shipped pipeline. Each channel searches at its own depth, then RRF orders the union."""
     dense = search_with_scores(
         query, role_filter=role_filter, doc_filter=doc_filter, k=settings.dense_top_k
     )
+    # Weight 0 means the channel is off, so do not pay for it - and do not require the BM25
+    # extension on a database that is only ever asked for dense results.
     sparse = search_sparse(
         query, role_filter=role_filter, doc_filter=doc_filter, k=settings.sparse_top_k
+    ) if settings.sparse_weight else []
+    return fuse(
+        {"dense": [c for c, _ in dense], "sparse": [c for c, _ in sparse]},
+        k=k,
+        weights={"dense": settings.dense_weight, "sparse": settings.sparse_weight},
     )
-    return fuse({"dense": [c for c, _ in dense], "sparse": [c for c, _ in sparse]}, k=k)
-
-
-def search_ranked(
-    query: str,
-    *,
-    role_filter: list[ChunkRole] | None = None,
-    doc_filter: list[str] | None = None,
-    k: int = settings.rerank_top_k,
-) -> list[Hit]:
-    """The shipped pipeline. Fusion decides the pool; the cross-encoder decides the order."""
-    pool = search_hybrid(
-        query, role_filter=role_filter, doc_filter=doc_filter, k=settings.fusion_top_k
-    )
-    by_id = {hit.chunk.chunk_id: hit for hit in pool}
-    return [
-        replace(by_id[chunk.chunk_id], rerank_score=score)
-        for chunk, score in rerank(query, [hit.chunk for hit in pool], k=k)
-    ]
 
 
 def search_corpus(
@@ -109,7 +108,7 @@ def search_corpus(
     k: int = settings.rerank_top_k,
 ) -> list[Chunk]:
     """Chunks, never Documents - generation and the future agent share this one type."""
-    return [hit.chunk for hit in search_ranked(
+    return [hit.chunk for hit in search_hybrid(
         query, role_filter=role_filter, doc_filter=doc_filter, k=k
     )]
 
@@ -123,21 +122,13 @@ def main() -> None:
     parser.add_argument("-k", type=int, default=settings.rerank_top_k)
     parser.add_argument("--role", action="append", type=ChunkRole, choices=list(ChunkRole))
     parser.add_argument("--doc", action="append", help="restrict to these doc_ids")
-    parser.add_argument("--stage", choices=("pipeline", "fused", "dense", "sparse"),
-                        default="pipeline", help="inspect one stage instead of the whole pipeline")
-    parser.add_argument("--reranker", choices=("family", "gte"), help="override the configured arm")
+    parser.add_argument("--stage", choices=("fused", "dense", "sparse"), default="fused",
+                        help="inspect one channel instead of the fused result")
     parser.add_argument("--text", action="store_true", help="print the chunk body too")
     args = parser.parse_args()
 
-    if args.reranker:
-        from insurance_rag.config import Reranker
-
-        settings.reranker = Reranker(args.reranker)
-
     common = {"role_filter": args.role, "doc_filter": args.doc, "k": args.k}
-    if args.stage == "pipeline":
-        rows = [(h.chunk, h.rerank_score, "+".join(h.channels)) for h in search_ranked(args.query, **common)]
-    elif args.stage == "fused":
+    if args.stage == "fused":
         rows = [(h.chunk, h.score, "+".join(h.channels)) for h in search_hybrid(args.query, **common)]
     elif args.stage == "dense":
         rows = [(c, s, "dense") for c, s in search_with_scores(args.query, **common)]

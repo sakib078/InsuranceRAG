@@ -8,6 +8,10 @@ Evals:
 https://docs.langchain.com/langsmith/evaluate-rag-tutorial#configure-the-environment
 
 
+RRF
+----------
+https://medium.com/@devalshah1619/mathematical-intuition-behind-reciprocal-rank-fusion-rrf-explained-in-2-mins-002df0cc5e2a
+
 Agentic topics
 =--------------------=
 
@@ -21,3 +25,4 @@ postgres / pgvector
 
 https://www.youtube.com/watch?v=j1QcPSLj7u0
 https://www.geeksforgeeks.org/data-science/pgvector/
+https://www.paradedb.com/blog/hybrid-search-in-postgresql-the-missing-manual

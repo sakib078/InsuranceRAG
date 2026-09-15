@@ -1,8 +1,23 @@
-"""Cross-encoder rerank: query and clause read together, which the bi-encoder never does.
+"""PARKED - cross-encoder rerank, measured and disconnected. Not on the import path.
 
-The bi-encoder scored every provision offline, before any question existed. This reads the pair
-in one forward pass with full attention between them, so it can tell a clause that answers the
-question from one that merely shares its vocabulary.
+Built for Phase 5, then removed from the pipeline because it did not earn its place. Measured
+over the same 56-record golden set, same corpus, same fused candidate pool:
+
+    configuration                 single        multi         exclusion     latency
+    dense only (baseline)         0.737 14/19   0.050 1/20    0.450 9/20    ~0.5s
+    fused + gte-modernbert 150M   0.684 13/19   0.100 2/20    0.400 8/20    ~17s
+    fused + Qwen3-Reranker 0.6B   0.737 14/19   0.000 0/20    0.300 6/20    ~124s
+
+Neither arm beat dense-only on any metric; the larger model was worst. Exclusion recall fell
+monotonically with model size (9 -> 8 -> 6), which is the failure that matters here: a coverage
+clause and the exclusion cancelling it are near-identical in wording, and a reranker asked
+"does this answer the question" prefers the grant over the limit. `INSTRUCT` names exclusions
+explicitly and that was not enough.
+
+Kept because the finding is worth keeping, and because a reranker trained or prompted for
+limiting provisions may still be the right answer later. To re-wire: move back to
+`insurance_rag/retrieval/`, and in `search.py` have `search_corpus` call `rerank()` over the
+pool `search_hybrid` returns. `settings.reranker` and `RERANKERS` in config.py are untouched.
 
 Qwen3-Reranker is a causal LM, not a classification head: it is asked a yes/no question and
 scored on the logits of those two tokens. `sentence_transformers.CrossEncoder` cannot load it.
