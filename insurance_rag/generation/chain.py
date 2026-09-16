@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -85,8 +86,14 @@ def _chain():
 
 
 def cited(text: str, chunks: list[Chunk]) -> list[Chunk]:
-    """The chunks the answer actually leans on - rule 2 makes every locator appear verbatim."""
-    return [c for c in chunks if c.locator in text]
+    """The chunks the answer actually leans on - rule 2 makes every locator appear verbatim.
+
+    Both sides are NFKC-normalised because the generator writes U+202F, a narrow no-break space,
+    where the locator has an ordinary one: measured at 21 of 62 answers whose citations a raw
+    substring match could not see. NFKC leaves the curly quotes in definition locators alone.
+    """
+    normal = unicodedata.normalize("NFKC", text)
+    return [c for c in chunks if unicodedata.normalize("NFKC", c.locator) in normal]
 
 
 def answer(question: str, *, k: int | None = None) -> Answer:
