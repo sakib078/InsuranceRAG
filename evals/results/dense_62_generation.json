@@ -1,0 +1,22 @@
+{
+  "config": "dense_62",
+  "suite": "generation",
+  "at": "2026-09-15T23:30:48.535674+00:00",
+  "encoder": "qwen3",
+  "retrieval": "dense 50 (w=1.0) + sparse 20 (w=0.0) -> RRF k=60 (no rerank - see artifacts/rerank.py), pinned k=5",
+  "generation": "groq/openai/gpt-oss-120b",
+  "judge_chain": "gemini/models/gemini-3.5-flash-lite,gemini/models/gemini-3.1-flash-lite,groq/qwen/qwen3.8-27b,openrouter/google/gemma-4-31b-it:free",
+  "judges_served": {
+    "gemini/models/gemini-3.5-flash-lite": 124
+  },
+  "records": 62,
+  "scores": {
+    "recall@5_single": 0.6666666666666666,
+    "recall@5_multi": 0.09523809523809523,
+    "exclusion_recall": 0.46153846153846156,
+    "citation_accuracy": 0.4986559139784946,
+    "correctness": 0.7096774193548387,
+    "groundedness": 0.6612903225806451
+  },
+  "misses": {}
+}

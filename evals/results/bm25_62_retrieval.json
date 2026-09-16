@@ -1,0 +1,61 @@
+{
+  "config": "bm25_62",
+  "suite": "retrieval",
+  "at": "2026-09-15T23:49:35.391716+00:00",
+  "k": 5,
+  "encoder": "qwen3",
+  "chunking": "clause",
+  "retrieval": "dense 50 (w=1.0) + sparse 20 (w=0.7) -> RRF k=60 (no rerank - see artifacts/rerank.py)",
+  "records": 62,
+  "scores": {
+    "recall@5_single": 0.7083333333333334,
+    "recall@5_multi": 0.14285714285714285,
+    "exclusion_recall": 0.5
+  },
+  "misses": {
+    "recall@5_single": [
+      "g-001",
+      "g-004",
+      "g-005",
+      "g-007",
+      "g-015",
+      "g-057",
+      "g-062"
+    ],
+    "exclusion_recall": [
+      "g-015",
+      "g-020",
+      "g-022",
+      "g-029",
+      "g-030",
+      "g-031",
+      "g-033",
+      "g-034",
+      "g-035",
+      "g-036",
+      "g-038",
+      "g-057",
+      "g-062"
+    ],
+    "recall@5_multi": [
+      "g-020",
+      "g-022",
+      "g-023",
+      "g-024",
+      "g-025",
+      "g-026",
+      "g-027",
+      "g-028",
+      "g-029",
+      "g-030",
+      "g-031",
+      "g-032",
+      "g-033",
+      "g-034",
+      "g-035",
+      "g-036",
+      "g-038",
+      "g-039"
+    ]
+  }
+}

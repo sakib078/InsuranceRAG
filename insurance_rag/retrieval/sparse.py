@@ -1,44 +1,41 @@
-"""Lexical retrieval over the table pgvector already owns - see docs/plan.md, Phase 4.
+"""BM25 lexical retrieval, in the table pgvector already owns - see docs/plan.md, Phase 4.
 
 Dense search discards surface form by design, which is what lets a claimant's wording reach the
 regulation's. The same property destroys `s. 31`: a citation is an identifier, not a meaning.
 This is the other channel.
+
+BM25 rather than `ts_rank_cd` because ranking here turns on *rare* terms. A clause number appears
+in one chunk; "insurance" appears in nearly all of them. `ts_rank_cd` cannot tell those apart -
+it has no inverse document frequency - and the measured cost was 7 broken questions against 1
+rescued. See `artifacts/sparse_tsrank.py` for that arm and its numbers.
+
+Needs ParadeDB's `pg_search`; the stock pgvector image does not carry it.
 """
 
 from __future__ import annotations
+
+from functools import lru_cache
 
 from insurance_rag.config import settings
 from insurance_rag.retrieval.store import to_chunk
 from insurance_rag.schema import Chunk, ChunkRole
 
-__all__ = ["search_sparse", "psycopg_dsn", "FTS_EXPRESSION", "RANK_WEIGHTS"]
+__all__ = ["search_sparse", "psycopg_dsn", "dialect", "INDEX_NAME"]
 
-#: The indexed expression, shared with scripts/migrate_fts.py so index and query cannot drift.
-#: Locator unstemmed at weight A - a citation query aims at nothing else; body stemmed at B so
-#: natural-language questions still match. The two-argument `to_tsvector` is IMMUTABLE and the
-#: one-argument form is not, which is what a generated column requires.
-FTS_EXPRESSION = (
-    "setweight(to_tsvector('simple', coalesce(cmetadata ->> 'locator', '')), 'A') || "
-    "setweight(to_tsvector('english', document), 'B')"
-)
+INDEX_NAME = "langchain_pg_embedding_bm25_idx"
 
-#: ts_rank_cd weights, ordered {D, C, B, A}: a locator hit outranks a body hit four to one.
-RANK_WEIGHTS = [0.1, 0.2, 0.4, 1.0]
-
-# plainto_tsquery conjoins its terms, so a six-word question matches nothing. Ranking wants
-# "how many of these terms, how densely", so the AND is rewritten to OR before it is cast back.
-_TSQUERY = (
-    "replace(plainto_tsquery('simple', %(query)s)::text, '&', '|')::tsquery || "
-    "replace(plainto_tsquery('english', %(query)s)::text, '&', '|')::tsquery"
-)
+#: pg_search renamed its match operator and score function; schema name -> (operator, score fn).
+_DIALECTS = {
+    "pdb": ("|||", "pdb.score"),  # newer releases
+    "paradedb": ("@@@", "paradedb.score"),  # earlier releases
+}
 
 _SQL = """
-WITH q AS (SELECT {tsquery} AS tsq)
-SELECT e.document, e.cmetadata, ts_rank_cd(%(weights)s::float4[], e.fts, q.tsq) AS score
+SELECT e.document, e.cmetadata, {score}(e.id) AS score
 FROM langchain_pg_embedding e
-JOIN langchain_pg_collection c ON c.uuid = e.collection_id
-CROSS JOIN q
-WHERE c.name = %(collection)s AND e.fts @@ q.tsq{filters}
+WHERE e.document {op} %(query)s
+  AND e.collection_id = (SELECT uuid FROM langchain_pg_collection WHERE name = %(collection)s)
+  {filters}
 ORDER BY score DESC, e.id
 LIMIT %(k)s
 """
@@ -49,6 +46,24 @@ def psycopg_dsn() -> str:
     return settings.postgres_dsn.replace("postgresql+psycopg://", "postgresql://", 1)
 
 
+@lru_cache(maxsize=1)
+def dialect() -> tuple[str, str]:
+    """Whichever pg_search spelling this server has, resolved once per process."""
+    import psycopg
+
+    with psycopg.connect(psycopg_dsn()) as conn, conn.cursor() as cur:
+        cur.execute("SELECT nspname FROM pg_namespace WHERE nspname = ANY(%s)", (list(_DIALECTS),))
+        found = {row[0] for row in cur.fetchall()}
+
+    for schema, spelling in _DIALECTS.items():
+        if schema in found:
+            return spelling
+    raise SystemExit(
+        "pg_search is not installed on this database - sparse retrieval needs ParadeDB. "
+        "Run scripts/migrate_bm25.py, or point IRAG_POSTGRES_DSN at the ParadeDB container."
+    )
+
+
 def search_sparse(
     query: str,
     *,
@@ -56,15 +71,12 @@ def search_sparse(
     doc_filter: list[str] | None = None,
     k: int = settings.sparse_top_k,
 ) -> list[tuple[Chunk, float]]:
-    """`ts_rank_cd` over the GIN index; higher is better, unlike the dense channel's distance."""
+    """BM25 relevance; higher is better, unlike the dense channel's cosine distance."""
     import psycopg
+    from langchain_core.documents import Document
 
-    params: dict = {
-        "query": query,
-        "weights": RANK_WEIGHTS,
-        "collection": settings.collection_name,
-        "k": k,
-    }
+    op, score = dialect()
+    params: dict = {"query": query, "collection": settings.collection_name, "k": k}
 
     # Every collection lives in one heap keyed only by collection_id; a query that forgets it
     # reads another arm's rows. Filters mirror the dense side's JSONB predicates.
@@ -76,14 +88,12 @@ def search_sparse(
         filters += " AND e.cmetadata ->> 'doc_id' = ANY(%(docs)s)"
         params["docs"] = list(doc_filter)
 
-    sql = _SQL.format(tsquery=_TSQUERY, filters=filters)
+    sql = _SQL.format(op=op, score=score, filters=filters)
     with psycopg.connect(psycopg_dsn()) as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
 
-    from langchain_core.documents import Document
-
     return [
-        (to_chunk(Document(page_content=text, metadata=metadata)), float(score))
-        for text, metadata, score in rows
+        (to_chunk(Document(page_content=text, metadata=metadata)), float(value))
+        for text, metadata, value in rows
     ]
