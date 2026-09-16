@@ -13,18 +13,20 @@ dependencies = [
     "pymupdf>=1.24",                # page numbers and scanned-page detection only
     "beautifulsoup4>=4.12",
     "lxml>=5.3",
+    "httpx>=0.27",                  # e-Laws fetch in scripts/fetch_corpus.py
     # chunking - the reference tokenizer (Deviation 5), loaded directly
     "transformers>=4.51",
     # retrieval - two bi-encoders under test, each with its family reranker
     "langchain-huggingface>=0.1",
     "sentence-transformers>=3.3",
     "torch>=2.6",
+    "numpy>=1.26",                  # reads the precomputed .npz in scripts/index.py
     # storage - one Postgres: pgvector for dense, tsvector/GIN for sparse
     "langchain-postgres>=0.0.13",
     "psycopg[binary]>=3.2",
     "pgvector>=0.3.6",
-    # generation
-    "langchain-anthropic>=0.3",
+    # generation - open-weight models on OpenAI-compatible endpoints
+    "langchain-openai>=0.2",
     # config
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
@@ -39,9 +41,8 @@ serve = [
     "uvicorn[standard]>=0.32",
 ]
 eval = [
-    "ragas>=0.2.9",
-    "datasets>=3.0",
-    "pandas>=2.2",
+    # dataset push and the hosted experiment runner
+    "langsmith>=0.1.140",
 ]
 dev = [
     "pytest>=8.3",

@@ -11,39 +11,53 @@ hand-labelled golden set, so the weak spots are numbers rather than opinions.
 ## Results
 
 62 hand-written question/answer pairs, each labelled with the clauses that should be
-retrieved. 20 Ontario documents, 3,896 chunks. Every row retrieves top-5.
+retrieved. 20 Ontario documents, 3,896 chunks. Retrieval scored at top-5; answers are generated
+through the retry ladder, which re-asks at top-20 after a refusal.
 
 | Configuration | recall@5 single | recall@5 multi | exclusion recall | citation accuracy | correctness | groundedness |
 |---|---|---|---|---|---|---|
 | Dense only | 0.667 | 0.095 | 0.462 | 0.499 | 0.710 | 0.661 |
-| **+ BM25 sparse, fused by RRF** | **0.708** | 0.095 | **0.500** | **0.520** | **0.726** | **0.677** |
-| + cross-encoder rerank | — | — | — | — | — | rejected, below |
+| + BM25 sparse, fused by RRF | 0.708 | 0.095 | 0.500 | 0.520 | 0.726 | 0.677 |
+| **+ retry ladder (shipped)** | **0.708** | 0.143 | **0.500** | **0.542** | **0.774** | **0.742** |
 | + agent with coverage loop | — | — | — | — | — | pending |
 
-Same 62 questions, same generator, same judge — the only variable between those two rows is the
-sparse channel. **Every metric moves up and none moves down**, which is the loop closing: better
-retrieval, better answers.
+One variable per row. BM25 adds +0.016 correctness — one answer in 62, so direction rather than
+result. The ladder adds **+0.048, three answers**, by re-asking refusals against the top-20 pool;
+it changes no retrieval metric because it only widens *after* a refusal.
 
-Read it cautiously. Correctness 0.710 → 0.726 is **one more correct answer out of 62**, well
-inside the noise. What's defensible is the direction, consistent across six metrics, with the
-mechanism identified before the run: BM25 rescued three retrieval records and broke one, and
-every flip was predicted from the scoring function.
+### Ceiling — the same pipeline at top-20
 
-Groundedness understates the system — it is scored across the 17 refusal records, where there
-are no facts to be grounded in. On the answerable slice it is closer to 0.82.
+What a reranker or a wider retry would have to work with:
 
-Two things were built, measured and thrown away. That is what the harness is for:
+| | top-5 | top-20 | gap |
+|---|---|---|---|
+| recall single | 0.708 | **0.875** | 4 questions |
+| recall multi | 0.143 | **0.381** | 5 |
+| exclusion recall | 0.500 | **0.731** | 6 |
 
-- **Postgres `ts_rank` for the sparse channel.** No inverse document frequency, so in a corpus
-  where every chunk says "insurance" that word counted as much as a clause number. It rescued
-  one question and broke seven. BM25 — same channel, same weight, IDF added — rescued three and
-  broke one. Parked in `artifacts/sparse_tsrank.py`.
-- **Cross-encoder reranking.** Neither `Qwen3-Reranker-0.6B` nor a 150M alternative beat dense
-  on any metric, and exclusion recall fell as the model grew: a reranker asked *"does this
-  answer the question"* prefers the clause granting a benefit to the one taking it away. The
-  0.6B model took 124s per query to get there. Parked in `artifacts/rerank.py`.
+Reordering the pool can reach the middle column and no further. Past it, **13 of 21 multi-hop
+questions have gold clauses outside the top 20 entirely** — one query cannot surface them however
+it is ranked. That is what the agent is for, and why multi-hop ignored chunk size, a lexical
+channel and two cross-encoders alike.
 
-### Measured earlier, on 56 records
+### Built, measured, rejected
+
+| | result | parked in |
+|---|---|---|
+| `ts_rank` sparse | no IDF, so "insurance" outweighed clause numbers: +1 question, −7 | `artifacts/sparse_tsrank.py` |
+| Qwen3-Reranker 0.6B | lost on every metric; 124s/query | `artifacts/rerank.py` |
+| gte-modernbert 150M | lost on every metric; 17s/query | `artifacts/rerank.py` |
+
+Exclusion recall fell as the reranker grew — asked *"does this answer the question"*, a
+cross-encoder prefers the clause granting a benefit to the one cancelling it. Both were measured
+before BM25 replaced `ts_rank`, so they reranked a noisier pool than today's.
+
+Two caveats on precision: groundedness is scored across the 17 refusal records where there are no
+facts to be grounded in (~0.82 on the answerable slice), and BM25 ranking shifts by about one
+question across index rebuilds, which is why multi-hop reads 0.095 in one table and 0.143 in the
+other.
+
+### Earlier, on 56 records
 
 Six citation-shaped questions were added to the golden set afterwards, so these are not
 comparable to the table above.

@@ -1,0 +1,46 @@
+{
+  "config": "pool_k20",
+  "suite": "retrieval",
+  "at": "2026-09-16T22:06:57.926828+00:00",
+  "k": 20,
+  "encoder": "qwen3",
+  "chunking": "clause",
+  "retrieval": "dense 50 (w=1.0) + sparse 20 (w=0.7) -> RRF k=60 (no rerank - see artifacts/rerank.py)",
+  "records": 62,
+  "scores": {
+    "recall@20_single": 0.875,
+    "recall@20_multi": 0.38095238095238093,
+    "exclusion_recall": 0.7307692307692307
+  },
+  "misses": {
+    "recall@20_single": [
+      "g-005",
+      "g-057",
+      "g-062"
+    ],
+    "recall@20_multi": [
+      "g-020",
+      "g-022",
+      "g-023",
+      "g-026",
+      "g-027",
+      "g-028",
+      "g-030",
+      "g-031",
+      "g-032",
+      "g-034",
+      "g-035",
+      "g-036",
+      "g-038"
+    ],
+    "exclusion_recall": [
+      "g-030",
+      "g-031",
+      "g-034",
+      "g-036",
+      "g-038",
+      "g-057",
+      "g-062"
+    ]
+  }
+}

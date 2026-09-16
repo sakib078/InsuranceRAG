@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -16,10 +17,9 @@ __all__ = ["Answer", "answer", "cited", "format_context", "LADDER", "REFUSAL"]
 REFUSAL = "This corpus does not address that."
 
 #: Widen the window on a refusal before believing it. Existing knobs, no new ones.
-#: The `dense_top_k` rung is gone: measured at 7,719-12,534 prompt tokens, every request at that
-#: width breaches the 8,000 TPM ceiling of the free tier this was measured on. It was a stand-in
-#: for the missing reranker anyway, and 50 chunks dilute the context more than they help. Phase 5
-#: escalates on the cross-encoder's confidence instead of on k.
+#: The `dense_top_k` rung is gone: measured at 7,719-12,534 prompt tokens, a k=50 request
+#: breaches the 8,000 TPM ceiling of the free tier this was measured on and comes back HTTP 413.
+#: 50 chunks also dilute the context more than they help, so the ladder tops out at 20.
 LADDER: tuple[int, ...] = (settings.rerank_top_k, settings.fusion_top_k)
 
 #: Below that 8,000 TPM ceiling with room for the system prompt, so one request can never 413.
@@ -86,8 +86,14 @@ def _chain():
 
 
 def cited(text: str, chunks: list[Chunk]) -> list[Chunk]:
-    """The chunks the answer actually leans on - rule 2 makes every locator appear verbatim."""
-    return [c for c in chunks if c.locator in text]
+    """The chunks the answer actually leans on - rule 2 makes every locator appear verbatim.
+
+    Both sides are NFKC-normalised because the generator writes U+202F, a narrow no-break space,
+    where the locator has an ordinary one: measured at 21 of 62 answers whose citations a raw
+    substring match could not see. NFKC leaves the curly quotes in definition locators alone.
+    """
+    normal = unicodedata.normalize("NFKC", text)
+    return [c for c in chunks if unicodedata.normalize("NFKC", c.locator) in normal]
 
 
 def answer(question: str, *, k: int | None = None) -> Answer:

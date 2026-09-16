@@ -1,4 +1,6 @@
-"""Add the generated tsvector column and its GIN index to langchain_pg_embedding. Idempotent.
+"""PARKED with `artifacts/sparse_tsrank.py` - that channel's migration. Not on the import path.
+
+Add the generated tsvector column and its GIN index to langchain_pg_embedding. Idempotent.
 
 Generated, not trigger-maintained: re-indexing a chunk rewrites its tsvector in the same write,
 so the full-text index cannot drift from `document` and there is nothing to rebuild after an
@@ -7,7 +9,14 @@ ingest. Unlike an ANN vector index this one is exact, so it changes no measured 
 
 from __future__ import annotations
 
-from insurance_rag.retrieval.sparse import FTS_EXPRESSION, psycopg_dsn
+from artifacts.sparse_tsrank import psycopg_dsn
+
+#: Copied from `artifacts/sparse_tsrank.py` so the parked pair stays self-contained; the live
+#: sparse module is BM25 now and no longer defines it. Keep the two spellings identical.
+FTS_EXPRESSION = (
+    "setweight(to_tsvector('simple', coalesce(cmetadata ->> 'locator', '')), 'A') || "
+    "setweight(to_tsvector('english', document), 'B')"
+)
 
 COLUMN = f"""
 ALTER TABLE langchain_pg_embedding

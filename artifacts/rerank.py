@@ -17,7 +17,8 @@ explicitly and that was not enough.
 Kept because the finding is worth keeping, and because a reranker trained or prompted for
 limiting provisions may still be the right answer later. To re-wire: move back to
 `insurance_rag/retrieval/`, and in `search.py` have `search_corpus` call `rerank()` over the
-pool `search_hybrid` returns. `settings.reranker` and `RERANKERS` in config.py are untouched.
+pool `search_hybrid` returns. The arm selection lives here now, not in config.py - nothing on
+the import path reads it, so it travels with the code it serves.
 
 Qwen3-Reranker is a causal LM, not a classification head: it is asked a yes/no question and
 scored on the logits of those two tokens. `sentence_transformers.CrossEncoder` cannot load it.
@@ -25,12 +26,55 @@ scored on the logits of those two tokens. `sentence_transformers.CrossEncoder` c
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 from functools import lru_cache
 
-from insurance_rag.config import settings
+from insurance_rag.config import Encoder, settings
 from insurance_rag.schema import Chunk
 
-__all__ = ["rerank", "score_pairs", "INSTRUCT"]
+__all__ = ["rerank", "score_pairs", "reranker_spec", "INSTRUCT", "Reranker", "RerankerSpec"]
+
+
+class Reranker(StrEnum):
+    """Which cross-encoder orders the fused pool."""
+
+    FAMILY = "family"  # the bi-encoder's own family, per ENCODERS - the locked default
+    GTE = "gte"
+
+
+@dataclass(frozen=True)
+class RerankerSpec:
+    """`backend` picks the scoring path: a yes/no logit pair, or a classifier head."""
+
+    model: str
+    backend: str  # causal | sequence
+    params: str
+
+
+#: How each family's own cross-encoder is scored. `EncoderSpec.cross_encoder` names the model;
+#: only this arm cares how to run it, so the backend rides here rather than in config.py.
+FAMILY_BACKENDS: dict[Encoder, str] = {
+    Encoder.QWEN3: "causal",
+    Encoder.BGE_M3: "sequence",
+}
+
+#: The small arm is 4x smaller and still 8K-context, so the comparison is size, not truncation -
+#: a 512-context reranker would cut an 800-token provision and measure that instead.
+RERANKERS: dict[Reranker, RerankerSpec] = {
+    Reranker.GTE: RerankerSpec("Alibaba-NLP/gte-reranker-modernbert-base", "sequence", "150M"),
+}
+
+#: family | gte. Only the cross-encoder changes, so a row swap measures model size alone.
+RERANKER: Reranker = Reranker.FAMILY
+
+
+def reranker_spec() -> RerankerSpec:
+    """`family` keeps Deviation 6; any other arm breaks it deliberately, to be measured."""
+    if RERANKER is Reranker.FAMILY:
+        spec = settings.spec
+        return RerankerSpec(spec.cross_encoder, FAMILY_BACKENDS[settings.encoder], "0.6B")
+    return RERANKERS[RERANKER]
 
 _PREFIX = (
     "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query "
@@ -66,7 +110,7 @@ def _model():
     import torch
     from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
 
-    spec = settings.reranker_spec
+    spec = reranker_spec()
     device, dtype = _device_dtype()
 
     if spec.backend == "causal":
