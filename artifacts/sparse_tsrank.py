@@ -14,7 +14,7 @@ rescue is a rare-token match - exactly the split IDF exists to fix, which is the
 
 Kept because the negative result is worth keeping, and because it is the only sparse channel
 that runs on a stock `pgvector/pgvector:pg16` image - BM25 needs ParadeDB. To revive: move back
-to `insurance_rag/retrieval/`, and re-run `scripts/migrate_fts.py` for the tsvector + GIN index.
+to `insurance_rag/retrieval/`, and re-run `artifacts/migrate_fts.py` for the tsvector + GIN index.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from insurance_rag.schema import Chunk, ChunkRole
 
 __all__ = ["search_sparse", "psycopg_dsn", "FTS_EXPRESSION", "RANK_WEIGHTS"]
 
-#: The indexed expression, shared with scripts/migrate_fts.py so index and query cannot drift.
+#: The indexed expression, shared with artifacts/migrate_fts.py so index and query cannot drift.
 #: Locator unstemmed at weight A - a citation query aims at nothing else; body stemmed at B so
 #: natural-language questions still match. The two-argument `to_tsvector` is IMMUTABLE and the
 #: one-argument form is not, which is what a generated column requires.

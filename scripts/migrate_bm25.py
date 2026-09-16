@@ -1,6 +1,6 @@
 """Create the pg_search BM25 index on langchain_pg_embedding. Idempotent.
 
-Replaces the tsvector + GIN index `scripts/migrate_fts.py` builds. That one ranked with
+Replaces the tsvector + GIN index `artifacts/migrate_fts.py` builds. That one ranked with
 `ts_rank_cd`, which has no inverse document frequency, so a clause number counted no more than
 the word "insurance" - measured at 1 question rescued against 7 broken. BM25 adds IDF, term
 frequency saturation and length normalisation.
