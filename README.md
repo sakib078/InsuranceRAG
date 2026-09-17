@@ -18,12 +18,18 @@ through the retry ladder, which re-asks at top-20 after a refusal.
 |---|---|---|---|---|---|---|
 | Dense only | 0.667 | 0.095 | 0.462 | 0.499 | 0.710 | 0.661 |
 | + BM25 sparse, fused by RRF | 0.708 | 0.095 | 0.500 | 0.520 | 0.726 | 0.677 |
-| **+ retry ladder (shipped)** | **0.708** | 0.143 | **0.500** | **0.542** | **0.774** | **0.742** |
+| **+ retry ladder (shipped)** | **0.708** | 0.111 | **0.478** | **0.633** | **0.807** | **0.774** |
 | + agent with coverage loop | — | — | — | — | — | pending |
 
 One variable per row. BM25 adds +0.016 correctness — one answer in 62, so direction rather than
-result. The ladder adds **+0.048, three answers**, by re-asking refusals against the top-20 pool;
-it changes no retrieval metric because it only widens *after* a refusal.
+result. The ladder re-asks refusals against the top-20 pool and carries correctness to **0.807**.
+
+Two caveats on the ladder row. Five records hit a provider daily cap twice, so every column but
+groundedness is a mean over 57; groundedness covers all 62 because those five were graded
+separately, on the same binary scale. Its retrieval columns are not comparable to the rows above.
+And its citation accuracy is the only figure here measured after a fix to locator matching: the
+generator writes `U+202F` where the corpus has an ordinary space, which a raw substring match
+missed on 21 of 62 answers. The two rows above carry the pre-fix number and understate it.
 
 ### Ceiling — the same pipeline at top-20
 
@@ -35,10 +41,6 @@ What a reranker or a wider retry would have to work with:
 | recall multi | 0.143 | **0.381** | 5 |
 | exclusion recall | 0.500 | **0.731** | 6 |
 
-Reordering the pool can reach the middle column and no further. Past it, **13 of 21 multi-hop
-questions have gold clauses outside the top 20 entirely** — one query cannot surface them however
-it is ranked. That is what the agent is for, and why multi-hop ignored chunk size, a lexical
-channel and two cross-encoders alike.
 
 ### Built, measured, rejected
 
