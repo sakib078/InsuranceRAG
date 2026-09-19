@@ -3,9 +3,20 @@ Langchain docs
 
 https://docs.langchain.com/oss/python/integrations/document_loaders
 
+
+Inference
+----------------
+https://console.mistral.ai/home
+https://build.nvidia.com/explore/discover
+openrouter
+GROQ
+Google AI studio
+
 Evals:
 
 https://docs.langchain.com/langsmith/evaluate-rag-tutorial#configure-the-environment
+
+https://github.com/SEJALHANMANTE/NLPINSURANCE-FINTECHPROJ/tree/main
 
 
 RRF

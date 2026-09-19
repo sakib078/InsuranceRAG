@@ -39,6 +39,20 @@ PROVIDERS: dict[str, tuple[str, str, str]] = {
         "gemini_eval_key",
         "aistudio.google.com/apikey",
     ),
+    # Free tier covers the ministral sizes only: medium, small and magistral all answer 429
+    # `rate_limited` with no quota at all, not a per-second ceiling.
+    "mistral": (
+        "https://api.mistral.ai/v1",
+        "mistral_api_key",
+        "console.mistral.ai - needs phone verification and a data-training opt-in",
+    ),
+    # Lists far more models than a free account may call; the rest return 404 "Function ...
+    # Not found for account". Slow - ~22s a call on the one model that works.
+    "nvidia": (
+        "https://integrate.api.nvidia.com/v1",
+        "nvidia_api_key",
+        "build.nvidia.com - free Developer Program, no card",
+    ),
 }
 
 
