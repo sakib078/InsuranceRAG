@@ -102,14 +102,20 @@ class Settings(BaseSettings):
     # "qwen/qwen3.8-27b" survives. Failover moves down the list as each budget runs out.
     #   3.5-flash-lite  15 RPM / 500 RPD  - best judge with capacity for a whole run
     #   3.1-flash-lite  15 RPM / 500 RPD  - same limits, separate budget
-    #   ministral-14b   ~1B tokens/month, ~1.4s a call. The first candidate outside Google:
-    #                   tiers 1 and 2 share a provider, so one quota change ends both.
+    #   ministral 14b/  ~1B tokens/month EACH - Mistral meters per model, so these are three
+    #     8b / 3b       separate budgets, at ~1.4s / 1.1s / 0.7s a call. The first candidates
+    #                   outside Google: tiers 1 and 2 share a provider, so one quota change
+    #                   ends both. Mistral's free tier covers the ministral sizes only -
+    #                   medium, small and magistral all answer 429 with no quota at all.
     #   groq qwen       200k TPD of its own: Groq quotas are per-model, so judging here never
     #                   touches the budget generation spends on gpt-oss-120b
     #   glm-5.3-flash   ~22s a call, so ~45 min for a run - too slow to depend on, fast enough
     #                   to finish one
-    #   openrouter      last, because its free pool returns 429 "Provider returned error"
-    #                   under load - fine as a final fallback, wrong as a dependency
+    #   openrouter      its free pool returns 429 "Provider returned error" under load - fine
+    #                   as a fallback, wrong as a dependency
+    #   deepseek-v4     absolute last resort: ~94s a call is over three hours for a full run,
+    #                   which still beats a run that dies. Every entry here passed a structured
+    #                   output probe and a three-case discrimination check.
     # Gemini needs the "models/" prefix on its OpenAI-compatible endpoint. gemma-4-31b-it is
     # NOT in the chain on Gemini - it returns 500 above max_tokens=16 there, and a 5xx is not
     # exhaustion, so it would raise and end the run rather than fall through.
@@ -117,9 +123,12 @@ class Settings(BaseSettings):
         "gemini/models/gemini-3.5-flash-lite,"
         "gemini/models/gemini-3.1-flash-lite,"
         "mistral/ministral-14b-latest,"
+        "mistral/ministral-8b-latest,"
+        "mistral/ministral-3b-latest,"
         "groq/qwen/qwen3.8-27b,"
         "nvidia/z-ai/glm-5.3-flash,"
-        "openrouter/google/gemma-4-31b-it:free"
+        "openrouter/google/gemma-4-31b-it:free,"
+        "nvidia/deepseek-ai/deepseek-v4-flash-0731"
     )
 
     # --- agent ---
