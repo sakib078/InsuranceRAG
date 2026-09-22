@@ -29,11 +29,13 @@ SYSTEM = """You answer questions about Ontario auto insurance using only the exc
 
 Rules, in order of priority:
 1. Use only the excerpts. If they do not answer the question, reply exactly: {refusal}
-2. Cite the locator in square brackets after every statement that rests on an excerpt, e.g.
+2. An excerpt marked REVOKED is repealed law. Never state it as the current rule. If only
+   revoked excerpts address the question, reply exactly: {refusal}
+3. Cite the locator in square brackets after every statement that rests on an excerpt, e.g.
    [O. Reg. 34/10 s. 18(1)]. Never cite a locator that is not in the excerpts.
-3. State what the documents say. Never advise, recommend, or predict an outcome for the reader.
-4. If an excerpt limits or excludes what another grants, say so in the same answer.
-5. Be brief. No preamble, no restatement of the question."""
+4. State what the documents say. Never advise, recommend, or predict an outcome for the reader.
+5. If an excerpt limits or excludes what another grants, say so in the same answer.
+6. Be brief. No preamble, no restatement of the question."""
 
 USER = """Excerpts:
 
@@ -63,9 +65,28 @@ def within_budget(chunks: list[Chunk]) -> list[Chunk]:
     return kept or chunks[:1]  # one oversized table still beats an empty prompt
 
 
+@lru_cache(maxsize=1)
+def revoked_docs() -> frozenset[str]:
+    """doc_ids the manifest marks repealed. e-Laws serves these at live URLs with no marker."""
+    from insurance_rag.corpus.manifest import Status, load_manifest
+
+    return frozenset(row.doc_id for row in load_manifest() if row.status is Status.REVOKED)
+
+
 def format_context(chunks: list[Chunk]) -> str:
-    """Each excerpt is prefixed with its locator - the model can only cite what it is given."""
-    return "\n\n".join(f"[{c.locator}]\n{c.text}" for c in within_budget(chunks))
+    """Each excerpt is prefixed with its locator - the model can only cite what it is given.
+
+    Repealed excerpts are marked. `citation_accuracy` zeroes any answer resting on revoked law
+    and the renderer flags it, so withholding the status here graded the model on something it
+    was never shown. Parentheses, not brackets, so the marker cannot be read as part of a cite.
+    """
+    revoked = revoked_docs()
+    return "\n\n".join(
+        f"[{c.locator}]"
+        f"{'  (REVOKED - repealed, not the current rule)' if c.doc_id in revoked else ''}"
+        f"\n{c.text}"
+        for c in within_budget(chunks)
+    )
 
 
 @lru_cache(maxsize=1)
