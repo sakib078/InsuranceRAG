@@ -275,6 +275,72 @@ to reverse or keep deliberately, not by accident.
 
 ---
 
+## Future considerations for Phase 2 — retrieval
+
+Two things that belong to the Phase 2 seam, both deferred on a measurement rather than a
+preference. Neither is in the shipped pipeline.
+
+### A cross-encoder rerank
+
+Built in iteration 2, measured, and removed. Over the same golden set and the same fused
+candidate pool, neither arm beat dense-only on any metric:
+
+| configuration | single | multi | exclusion | latency |
+|---|---|---|---|---|
+| dense only | 0.737 | 0.050 | 0.450 | ~0.5s |
+| + gte-modernbert 150M | 0.684 | 0.100 | 0.400 | ~17s |
+| + Qwen3-Reranker 0.6B | 0.737 | 0.000 | 0.300 | ~124s |
+
+Exclusion recall fell monotonically with model size — a coverage clause and the exclusion that
+cancels it are near-identical in wording, and a reranker asked *"does this answer the question"*
+prefers the grant over the limit. Naming exclusions in the instruction was not enough.
+
+**Why it may still be worth revisiting.** Both arms were measured on a pool built by `ts_rank`,
+which was later shown to be actively harmful and replaced by BM25 — so they reranked a noisier
+candidate set than today's. And the headroom is real: at top-20 the pipeline reaches
+**0.875 / 0.381 / 0.731** against top-5's 0.708 / 0.143 / 0.500, meaning fifteen
+question-metric pairs sit at ranks 6–20, retrieved but not ranked high enough to reach the
+model. That is exactly what reordering can buy, and its hard ceiling.
+
+The open question is whether a reranker can collect that without demoting exclusions again.
+Code and full numbers are in `artifacts/rerank.py`.
+
+### An ANN vector index — HNSW or IVFFlat
+
+pgvector offers two index types. **Both are approximate**, despite IVFFlat often being described
+as exact — "Flat" means full vectors are stored inside each cluster, not that the search is
+exhaustive. IVFFlat partitions vectors by k-means and probes only the nearest `probes` clusters;
+a true neighbour in an unprobed cluster is simply never seen.
+
+| | How it searches | Build | Recall | Query cost |
+|---|---|---|---|---|
+| **None — today** | sequential scan, every vector compared | — | **100%** | O(n) |
+| **IVFFlat** | k-means clusters, probe the nearest few | fast; needs data present to train | tunable via `probes`, ~90–98% | O(n / lists × probes) |
+| **HNSW** | multi-layer proximity graph, greedy descent | slow, memory-hungry | best at equal speed, ~95–99% | ~O(log n) |
+
+**Neither is added**, for three reasons:
+
+1. **It buys latency we do not need, with recall we cannot spare.** 3,896 chunks × 1024 dims ×
+   4 bytes ≈ **16 MB** — it fits in shared buffers, and a sequential scan over it is
+   single-digit milliseconds and exactly correct. Every point of ANN recall lost is a gold
+   clause that silently stops being retrievable, and this project's measured headline is that
+   retrieval failure causes 8 of 10 wrong answers.
+2. **It would confound the baseline.** 0.737 was measured under exact search. Adding a lossy
+   index alongside a retrieval change mixes two variables into one delta.
+3. **IVFFlat is degenerate at this size.** The usual heuristic `lists ≈ rows / 1000` gives
+   **4 clusters** for this corpus — four centroids over 3,896 legal provisions is not a
+   partition of anything.
+
+**When this stops being deferred.** Exact search is O(n), so the trigger is corpus size, not
+time. Around **10⁵ chunks** a scan starts showing up next to the encoder call; past **10⁶** it
+dominates. The realistic path there is a national corpus, or ingesting LAT/AABS decisions. At
+that point: `CREATE INDEX … USING hnsw (embedding vector_cosine_ops)` — HNSW over IVFFlat
+because it does not need retraining as the corpus grows — then **re-run the retrieval suite and
+record the recall lost**. An ANN index is a measurable regression, and shipping it unmeasured
+would undo the point of the harness.
+
+---
+
 ## How a question actually flows
 
 `scripts/ask.py` calls `answer()`, and everything else hangs off that one function.

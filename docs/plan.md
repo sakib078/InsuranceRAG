@@ -514,7 +514,8 @@ The fix for `"s. 31"` and for the disjoint-paraphrase result.
 <details>
 <summary><b>Phase 4 as built — the full build plan</b></summary>
 
-Eval is deliberately absent here; the numbers land in Phase 5's single generation row.
+Eval was deliberately absent here; the generation row came later, once the reranker arm it was
+meant to share had been measured and dropped.
 
 ### Why this phase exists, in numbers
 
@@ -526,7 +527,8 @@ Two failures measured in iteration 1, both lexical rather than semantic:
 And from the baseline diagnosis: of 79 gold locators, **21 sit at rank 6–20** and **15 are
 absent from the top 50 entirely**. Those 15 are numbered subsections of the Insurance Act and
 OAP 1 — exactly the shape a lexical channel finds and a dense one cannot. The 21 are a
-reranker's job (Phase 5); the 15 are this phase's.
+reranker's job; the 15 are this phase's. The reranker was then built and rejected — see
+`docs/RAG_pipleline.md`, future considerations — so those 21 are still unclaimed.
 
 ### Step 4.0 — Tokenisation, settled before the migration
 
@@ -614,30 +616,11 @@ since iteration 1. No new dependencies — psycopg is already installed.
 
 ---
 
-## Phase 5 — Cross-encoder rerank
+## Phases 5 and 6 — dropped, both measured first
 
-- `insurance_rag/retrieval/rerank.py`. `settings.cross_encoder_model` already resolves to
-  `Qwen3-Reranker-0.6B` or `bge-reranker-v2-m3` by encoder family. Never mix families
-  (Deviation 6).
-- Reranks `fusion_top_k` (20) down to `rerank_top_k` (5), inside `search_corpus`.
-- Runs on CPU at query time — one query against 20 passages, not a batch job. Measure p95; if
-  it exceeds ~2s that is a real finding for the README cost section.
-- **The refusal gate belongs here, not earlier.** Iteration 1 could not set a distance
-  threshold because a correct hit sat at 0.532 while noise sat at 0.67. A cross-encoder
-  produces a calibrated relevance score instead, which is a threshold that can actually hold.
-  `chain.py`'s `LADDER` then escalates on low confidence, not only on refusal text.
-- Produces `evals/results/hybrid_rerank.json`.
+**Phase 5, the cross-encoder rerank, was built and rejected.**
 
----
-
-## Phase 6 — Definition index
-
-Spec v2 §04 lists it as a separate retrieval strategy, and `resolve_definition` is one of the
-agent's four tools. Ingestion already emits `chunk_role=definition` and per-term units keyed
-`s. 3(1) "accident"`, so most of the work is done.
-
-`resolve_definition(term)` in `search.py` — exact lookup on the definition slice, not
-similarity search. Feeds the agent in Phase 7. No ablation row of its own.
+**Phase 6, the definition index, was dropped before being built**
 
 ---
 
@@ -795,42 +778,3 @@ Three of its ideas are worth taking without the corpus, and two are already abov
 retrieval labels (Phase 4), authority as retrieval metadata (partly present as `status` /
 `is_official`), and the structured `grant → exclusion → exception → regulation` answer bundle
 (Phase 7's output contract).
-
----
-
-## Deferred — an ANN vector index, and the trigger for adding one
-
-pgvector offers two index types. **Both are approximate**, despite IVFFlat often being
-described as exact — "Flat" means full vectors are stored inside each cluster, not that the
-search is exhaustive. IVFFlat partitions vectors by k-means and probes only the nearest
-`probes` clusters; a true neighbour in an unprobed cluster is simply never seen.
-
-| | How it searches | Build | Recall | Query cost |
-|---|---|---|---|---|
-| **None — today** | sequential scan, every vector compared | — | **100%** | O(n) |
-| **IVFFlat** | k-means clusters, probe the nearest few | fast; needs data present to train | tunable via `probes`, ~90–98% | O(n / lists × probes) |
-| **HNSW** | multi-layer proximity graph, greedy descent | slow, memory-hungry | best at equal speed, ~95–99% | ~O(log n) |
-
-**Neither is being added now**, for three reasons:
-
-1. **It buys latency we do not need, with recall we cannot spare.** 3,896 chunks × 1024 dims ×
-   4 bytes ≈ **16 MB** — it fits in shared buffers and a sequential scan over it is
-   single-digit milliseconds, exactly correct. Every point of ANN recall lost is a gold clause
-   that silently stops being retrievable, and the measured headline of this project is that
-   retrieval failure causes 8 of 10 wrong answers.
-2. **It would confound the baseline.** 0.737 was measured under exact search. Adding a lossy
-   index during Phase 4 mixes two changes into one delta with no way to attribute either.
-3. **IVFFlat is degenerate at this size.** The usual heuristic `lists ≈ rows / 1000` gives
-   **4 clusters** for this corpus; four centroids over 3,896 legal provisions is not a
-   partition of anything.
-
-**When this stops being deferred.** Exact search is O(n), so the trigger is corpus size, not
-time. Around **10⁵ chunks** a scan starts showing up next to the encoder call; past **10⁶** it
-dominates. The realistic path there is the national corpus excluded above, or ingesting LAT/AABS
-decisions. At that point: `CREATE INDEX … USING hnsw (embedding vector_cosine_ops)`, HNSW over
-IVFFlat because it does not need retraining as the corpus grows, then **re-run the retrieval
-suite and record the recall lost** — an ANN index is a measurable regression, and shipping it
-unmeasured would undo the point of the harness.
-
-Until then the README says so plainly: no ANN index, because at this size exact search is
-cheaper than the recall would be.
