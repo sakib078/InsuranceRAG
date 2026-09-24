@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     sparse_top_k: int = 20
     fusion_top_k: int = 20
     rerank_top_k: int = 5
+    #: The ladder's wide rung. Separate from `fusion_top_k` so widening the retry does not also
+    #: resize the fusion pool, which is a measured variable in every recorded row.
+    ladder_top_k: int = 25
     rrf_k: int = 60  # reciprocal rank fusion smoothing constant
     #: Per-channel RRF weights. Equal weighting let sparse *inject* candidates - a junk hit at
     #: sparse rank 1 ties dense rank 1 at any `rrf_k`, and with 5 slots that is round-robin.
