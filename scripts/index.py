@@ -15,6 +15,7 @@ from insurance_rag.retrieval.store import (
     add_chunks,
     connection_string,
     read_chunks,
+    row_id,
     to_document,
     vector_store,
 )
@@ -35,7 +36,7 @@ def add_precomputed(chunks: list[Chunk], path: Path) -> None:
         texts=[d.page_content for d in documents],
         embeddings=vectors.tolist(),
         metadatas=[d.metadata for d in documents],
-        ids=ids,
+        ids=[row_id(c) for c in chunks],
     )
 
 

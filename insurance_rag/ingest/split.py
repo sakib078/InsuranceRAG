@@ -73,21 +73,22 @@ def to_chunks(row: ManifestRow, units: list[Document], terms: set[str]) -> list[
                 continue
             ordinal = len(chunks)
             locator = base if len(pieces) == 1 else f"{base} #{index}"
-            text = f"{context_header(row, locator, ancestors)}\n{text}"
+            body = text
+            text = f"{context_header(row, locator, ancestors)}\n{body}"
             chunks.append(
                 Chunk(
                     chunk_id=make_chunk_id(row.doc_id, ordinal),
                     doc_id=row.doc_id,
                     doc_type=row.doc_type,
                     chunk_role=classify_role(
-                        text, ancestors, locator, unit.metadata.get("heading", "")
+                        body, ancestors, locator, unit.metadata.get("heading", "")
                     ),
                     locator=locator,
                     ancestor_path=ancestors,
                     ordinal=ordinal,
                     text=text,
                     token_count=token_count(text),
-                    defined_terms=defined_terms_in(text, terms),
+                    defined_terms=defined_terms_in(body, terms),
                     page=unit.metadata.get("page"),
                 )
             )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
@@ -114,14 +115,20 @@ def cited(text: str, chunks: list[Chunk]) -> list[Chunk]:
     substring match could not see. NFKC leaves the curly quotes in definition locators alone.
     """
     normal = unicodedata.normalize("NFKC", text)
-    return [c for c in chunks if unicodedata.normalize("NFKC", c.locator) in normal]
+    return [c for c in chunks if _locator_re(c.locator).search(normal)]
+
+
+def _locator_re(locator: str) -> re.Pattern[str]:
+    """The whole locator only: `s. 1` must not match inside `s. 18`, `s. 1(2)` or `s. 1 #2`."""
+    escaped = re.escape(unicodedata.normalize("NFKC", locator))
+    return re.compile(rf"(?<![\w/]){escaped}(?![\w(]| [“#])")
 
 
 def answer(question: str, *, k: int | None = None) -> Answer:
     """Retry a refusal at a wider k; refuse for real only once the ladder is exhausted."""
     retrieved: list[Chunk] = []
     for width in (k,) if k else LADDER:
-        retrieved = search_corpus(question, k=width)
+        retrieved = within_budget(search_corpus(question, k=width))
         if not retrieved:
             break
         payload = {"context": format_context(retrieved), "question": question}

@@ -9,10 +9,10 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
-from insurance_rag.config import settings
+from insurance_rag.config import Encoder, settings
 from insurance_rag.schema import Chunk
 
-__all__ = ["embeddings", "vector_store", "add_chunks", "read_chunks", "to_chunk"]
+__all__ = ["embeddings", "vector_store", "add_chunks", "read_chunks", "to_chunk", "row_id"]
 
 #: Tuple fields survive JSONB as lists and have to be cast back on the way out.
 _TUPLE_FIELDS = ("ancestor_path", "defined_terms")
@@ -28,11 +28,21 @@ def embeddings():
     """The bi-encoder under test; queries get Qwen3's query prompt, documents do not."""
     from langchain_huggingface import HuggingFaceEmbeddings
 
+    query_kwargs = {"normalize_embeddings": True}
+    if settings.encoder is Encoder.QWEN3:  # bge-m3 defines no "query" prompt
+        query_kwargs["prompt_name"] = "query"
     return HuggingFaceEmbeddings(
         model_name=settings.bi_encoder_model,
         encode_kwargs={"normalize_embeddings": True},
-        query_encode_kwargs={"normalize_embeddings": True, "prompt_name": "query"},
+        query_encode_kwargs=query_kwargs,
     )
+
+
+def row_id(chunk: Chunk) -> str:
+    """The table's primary key; encoder-prefixed except qwen3, so the frozen index keeps its ids."""
+    if settings.encoder is Encoder.QWEN3:
+        return chunk.chunk_id
+    return f"{settings.encoder}:{chunk.chunk_id}"
 
 
 @lru_cache(maxsize=1)
@@ -58,7 +68,7 @@ def to_document(chunk: Chunk) -> Document:
     text = metadata.pop("text")
     for field in _TUPLE_FIELDS:
         metadata[field] = list(metadata[field])
-    return Document(id=chunk.chunk_id, page_content=text, metadata=metadata)
+    return Document(id=row_id(chunk), page_content=text, metadata=metadata)
 
 
 def to_chunk(doc: Document) -> Chunk:
@@ -87,5 +97,5 @@ def add_chunks(chunks: list[Chunk], *, batch_size: int = 64) -> int:
     store = vector_store()
     for start in range(0, len(chunks), batch_size):
         batch = chunks[start : start + batch_size]
-        store.add_documents([to_document(c) for c in batch], ids=[c.chunk_id for c in batch])
+        store.add_documents([to_document(c) for c in batch], ids=[row_id(c) for c in batch])
     return len(chunks)
