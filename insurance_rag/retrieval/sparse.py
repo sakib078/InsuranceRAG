@@ -14,6 +14,7 @@ Needs ParadeDB's `pg_search`; the stock pgvector image does not carry it.
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 
 from insurance_rag.config import settings
@@ -29,6 +30,9 @@ _DIALECTS = {
     "pdb": ("|||", "pdb.score"),  # newer releases
     "paradedb": ("@@@", "paradedb.score"),  # earlier releases
 }
+
+#: Characters the `@@@` parser treats as syntax; lowercasing also defuses AND/OR/NOT.
+_TANTIVY_SPECIAL = re.compile(r"[+\-&|!(){}\[\]^\"'~*?:\\/<>=]")
 
 _SQL = """
 SELECT e.document, e.cmetadata, {score}(e.id) AS score
@@ -76,7 +80,9 @@ def search_sparse(
     from langchain_core.documents import Document
 
     op, score = dialect()
-    params: dict = {"query": query, "collection": settings.collection_name, "k": k}
+    if op == "@@@":  # Tantivy query syntax; the tokenizer drops this punctuation anyway
+        query = _TANTIVY_SPECIAL.sub(" ", query).lower()
+    params: dict = {"query": query,"collection": settings.collection_name, "k": k}
 
     # Every collection lives in one heap keyed only by collection_id; a query that forgets it
     # reads another arm's rows. Filters mirror the dense side's JSONB predicates.

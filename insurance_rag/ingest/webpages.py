@@ -108,7 +108,7 @@ def units_from_html(row: ManifestRow, html: str) -> list[Document]:
             markdown = _table_markdown(el)
             if markdown:
                 start(provision or section, markdown, is_table=True)
-                flush()
+                start(provision or section, "")  # body after the table continues the provision
             continue
         if el.find_parent("table"):
             continue  # already emitted as part of its table
