@@ -1,13 +1,4 @@
-"""The ablation arm: fixed token windows that ignore every boundary the document declares.
-
-Deliberately naive. It exists so the clause-aware chunker has something to be measured against,
-and it answers the obvious objection to `recall@5_multi 0.050` - that five provision-sized
-chunks rarely hold three whole provisions, while five fat windows might.
-
-Gold locators cannot resolve against a window, so this also emits a coverage map: for each
-provision, how much of it each window holds. Computed from token spans rather than substring
-search, because a phrase can appear twice and a fraction cannot be guessed.
-"""
+"""The ablation arm: fixed token windows that ignore document boundaries, plus a coverage map."""
 
 from __future__ import annotations
 
@@ -23,8 +14,7 @@ __all__ = ["to_uniform_chunks", "SEPARATOR", "ID_PREFIX"]
 #: Joins one provision to the next in the flattened stream, exactly as a naive reader would see it.
 SEPARATOR = "\n\n"
 
-#: `langchain_pg_embedding` has PRIMARY KEY (id), not (id, collection_id), so an id shared with
-#: the clause-aware corpus does not land in this collection - it UPDATES that one's row instead.
+#: Chunk-id prefix; keeps ids from colliding with the clause-aware corpus's rows.
 ID_PREFIX = "u"
 
 
@@ -74,8 +64,7 @@ def to_uniform_chunks(
 
         # No clause path exists here - that is the point - so the window index is the locator.
         locator = f"{row.citation} s. window {ordinal + 1}"
-        # Document identity comes from the manifest, not from parsing, so a naive chunker has
-        # it too. Holding provenance constant keeps structure the only variable under test.
+        # Document identity comes from the manifest, keeping structure the only variable.
         body = f"{context_header(row, locator, ())}\n{text}"
 
         chunks.append(

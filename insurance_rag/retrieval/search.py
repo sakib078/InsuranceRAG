@@ -1,9 +1,4 @@
-"""The one retrieval seam: dense + sparse, fused by RRF.
-
-A cross-encoder rerank sat here and was removed - it lost on every metric and cost 124s a
-query. The code and its numbers are in `artifacts/rerank.py`; the pool this returns is what it
-would read if it comes back.
-"""
+"""The one retrieval seam: dense + sparse, fused by RRF."""
 
 from __future__ import annotations
 
@@ -55,11 +50,7 @@ def search_with_scores(
 def fuse(
     channels: dict[str, list[Chunk]], *, k: int, weights: dict[str, float] | None = None
 ) -> list[Hit]:
-    """Weighted reciprocal rank fusion: position only, so two score scales never have to meet.
-
-    `sum(w / (rrf_k + rank))` over the channels that found a chunk. Weighting is what keeps a
-    weak channel advisory - see `settings.sparse_weight`.
-    """
+    """Weighted reciprocal rank fusion: position only, so two score scales never have to meet."""
     weights = weights or {}
     scores: dict[str, float] = {}
     found: dict[str, list[str]] = {}
@@ -88,8 +79,7 @@ def search_hybrid(
     dense = search_with_scores(
         query, role_filter=role_filter, doc_filter=doc_filter, k=settings.dense_top_k
     )
-    # Weight 0 means the channel is off, so do not pay for it - and do not require the BM25
-    # extension on a database that is only ever asked for dense results.
+    # Weight 0 turns the sparse channel off, so it is not queried.
     sparse = search_sparse(
         query, role_filter=role_filter, doc_filter=doc_filter, k=settings.sparse_top_k
     ) if settings.sparse_weight else []

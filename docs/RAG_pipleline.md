@@ -22,7 +22,7 @@ tokenizer as the reference for `token_count`, citations render full provenance.
 | PDF | `DoclingLoader` primary; `PyMuPDFLoader` alongside for page numbers + scanned-page flag |
 | Splitter | Structure split first, `RecursiveCharacterTextSplitter` as the size enforcer |
 | Store | `langchain-postgres` `PGVector`, dense only; tsvector/GIN sibling table deferred |
-| Phases | 1 ingestion → 2 retrieval → 3 generation |
+| Phases | 1 ingestion (chunk → embed → index) → 2 retrieval → 3 generation |
 | Short chunks | Prepend a context header to the embedded text; never merge provisions |
 
 ### Two things flagged before starting
@@ -38,7 +38,13 @@ tokenizer as the reference for `token_count`, citations render full provenance.
 
 ## Phase 1 — Ingestion — built
 
-Output: `data/chunks/{doc_id}.jsonl`, one validated `Chunk` per line. Nothing touches Postgres.
+Output: `data/chunks/{doc_id}.jsonl`, one validated `Chunk` per line (Steps 1–5), then the
+Postgres index built from those files (Steps 6–7). Embedding and indexing are ingestion: they run
+once, offline, and nothing on the query path writes to the store.
+
+![Phase 1 — ingestion flow](Images/rag_phase1_ingestion.svg)
+
+*The pipeline as it stands now, including the BM25 index added in iteration 2.*
 
 ### Step 1 — `insurance_rag/ingest/webpages.py`
 
@@ -135,6 +141,30 @@ per-document count, median/max token count, and role histogram.
 `langchain-docling` (which pulls `docling`, `pypdfium2`, `torchvision`, `rapidocr` and
 downloads ~500 MB of layout models on first run).
 
+### Step 6 — Postgres
+
+Postgres 16 with pgvector, reached through `settings.postgres_dsn` (the psycopg3 form).
+Sparse retrieval also needs ParadeDB's `pg_search`, which the stock pgvector image does not
+carry (`retrieval/sparse.py`).
+
+### Step 7 — Embed and index: `insurance_rag/retrieval/store.py`, `scripts/index.py`
+
+The code sits in `retrieval/store.py` because the query path reads the same store; only its
+writes are ingestion.
+
+- `embeddings()` → `HuggingFaceEmbeddings(model_name=settings.bi_encoder_model)`, normalised.
+  Chunk text, context header included, is embedded with no prompt.
+- `add_chunks(chunks)` → `Document(page_content=chunk.text, metadata={every other field})`.
+  The row id is `chunk_id` (prefixed with the encoder for every encoder except qwen3), so
+  re-indexing upserts instead of duplicating.
+- `vector_store()` → `PGVector`, one collection per encoder and chunking, so the Deviation 8
+  bake-off can hold both indexes side by side over byte-identical chunks.
+- `scripts/index.py` reads `data/chunks/*.jsonl` and calls `add_chunks`. Idempotent.
+- `scripts/migrate_bm25.py` (added in iteration 2) builds the BM25 index on the same table.
+  Idempotent; it checks the index it built really is `bm25`.
+
+**Dependencies:** `langchain-postgres`, `langchain-huggingface`.
+
 ### Phase 1 results
 
 | Document | Chunks | Median tokens | Max |
@@ -161,20 +191,20 @@ Verified: `s. 31(1)` lands under `PART VII GENERAL EXCLUSIONS` and classifies `e
 
 ## Phase 2 — Retrieval
 
-### Step 1 — Postgres
+Reads the index Phase 1 built. Nothing here writes to Postgres.
 
-`docker-compose.yml` with `pgvector/pgvector:pg16`, matching `settings.postgres_dsn`.
+![Phase 2 — retrieval flow](Images/rag_phase2_retrieval.svg)
 
-### Step 2 — `insurance_rag/retrieval/store.py`
+*The pipeline as it stands now: dense and BM25 fused by weighted RRF, as built in iteration 2.
+The steps below are the iteration-1 record.*
 
-- `embeddings()` → `HuggingFaceEmbeddings(model_name=settings.bi_encoder_model)`.
-- `vector_store()` → `PGVector(collection_name=settings.encoder, connection=settings.postgres_dsn)`.
-  The collection is keyed by encoder so the Deviation 8 bake-off can hold both indexes side by
-  side over byte-identical chunks.
-- `add_chunks(chunks)` → `Document(page_content=chunk.text, metadata={every other field})`,
-  `ids=[c.chunk_id]` so re-ingest upserts instead of duplicating.
+### Step 1 — `insurance_rag/retrieval/store.py` (query side)
 
-### Step 3 — `insurance_rag/retrieval/search.py`
+- `embeddings()` embeds the query with Qwen3's *query* prompt; bge-m3 defines none.
+- `vector_store()` opens the collection Phase 1 wrote, and `to_chunk()` rebuilds a validated
+  `Chunk` from a returned row.
+
+### Step 2 — `insurance_rag/retrieval/search.py`
 
 ```
 search_corpus(query, *, role_filter=None, doc_filter=None, k=settings.rerank_top_k) -> list[Chunk]
@@ -187,18 +217,18 @@ agent share one type.
 **This is the seam for everything deferred.** Sparse `ts_rank` candidates, RRF fusion, and the
 cross-encoder rerank all land inside `search_corpus` without changing its signature.
 
-### Step 4 — `scripts/index.py`
-
-Reads `data/chunks/*.jsonl`, calls `add_chunks`. Idempotent.
-
-**Dependencies:** `langchain-postgres`, `langchain-huggingface`.
-
-**Verify:** index one document, then query `"minor injury"` and `"s. 31"`. The second scoring
-badly is expected, and is exactly the evidence for adding sparse later — record it, don't fix it.
+**Verify:** with one document indexed (Phase 1, Step 7), query `"minor injury"` and `"s. 31"`.
+The second scoring badly is expected, and is exactly the evidence for adding sparse later —
+record it, don't fix it.
 
 ---
 
 ## Phase 3 — Generation — built
+
+![Phase 3 — generation flow](Images/rag_phase3_generation.svg)
+
+*The pipeline as it stands now: a two-rung ladder (k = 5, then 25), a token budget, and the
+revoked-law marker, all added after iteration 1.*
 
 ### Step 1 — `insurance_rag/generation/citations.py`
 
@@ -267,7 +297,7 @@ which is the same finding as `"s. 31"` from Phase 2, arriving by a different rou
 
 Golden set and recall@5, sparse + RRF + cross-encoder rerank, the LangGraph coverage loop with
 its mandatory exclusion edge, `resolve_definition` / `fetch_neighbors` / `list_documents`,
-FastAPI, and deployment. Phase 2 Step 3 is the single seam all of the retrieval work returns to.
+FastAPI, and deployment. Phase 2 Step 2 is the single seam all of the retrieval work returns to.
 
 `docs/plan.md` locks "golden set **before** any retrieval code". This iteration knowingly
 inverts that to get one end-to-end path running first — flagged because it is a locked decision

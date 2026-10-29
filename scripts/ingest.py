@@ -74,8 +74,7 @@ def main() -> None:
         report(row.doc_id, chunks)
 
     if args.uniform:
-        # Gold locators cannot resolve against a window, so record how much of each provision
-        # every window holds; the eval applies its own threshold to this.
+        # Record how much of each provision every window holds; the eval applies a threshold.
         (settings.chunks_dir / GOLD_MAP).write_text(
             json.dumps(gold_map, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
         print(f"\n{len(gold_map)} provisions mapped -> {settings.chunks_dir.name}/{GOLD_MAP}")

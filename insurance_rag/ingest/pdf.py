@@ -127,8 +127,7 @@ def units_from_markdown(row: ManifestRow, markdown: str, pages: list[str]) -> li
             continue
 
         matched = _CLAUSE_RE.match(heading)
-        # Content before the first heading still belongs to the document - never drop it,
-        # and never let a cover page's title become the locator of the text beneath it.
+        # Keep content before the first heading; a cover title is not a locator.
         if not provision:
             path = "Preamble"
         else:

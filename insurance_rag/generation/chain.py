@@ -17,10 +17,7 @@ __all__ = ["Answer", "answer", "cited", "format_context", "LADDER", "REFUSAL"]
 
 REFUSAL = "This corpus does not address that."
 
-#: Widen the window on a refusal before believing it.
-#: The `dense_top_k` rung is gone: measured at 7,719-12,534 prompt tokens, a k=50 request
-#: breaches the 8,000 TPM ceiling of the free tier this was measured on and comes back HTTP 413.
-#: 50 chunks also dilute the context more than they help, so the ladder tops out well below it.
+#: Widen the window on a refusal before believing it; no k=50 rung (HTTP 413).
 LADDER: tuple[int, ...] = (settings.rerank_top_k, settings.ladder_top_k)
 
 #: Below that 8,000 TPM ceiling with room for the system prompt, so one request can never 413.
@@ -75,12 +72,7 @@ def revoked_docs() -> frozenset[str]:
 
 
 def format_context(chunks: list[Chunk]) -> str:
-    """Each excerpt is prefixed with its locator - the model can only cite what it is given.
-
-    Repealed excerpts are marked. `citation_accuracy` zeroes any answer resting on revoked law
-    and the renderer flags it, so withholding the status here graded the model on something it
-    was never shown. Parentheses, not brackets, so the marker cannot be read as part of a cite.
-    """
+    """Each excerpt is prefixed with its locator, and repealed ones are marked."""
     revoked = revoked_docs()
     return "\n\n".join(
         f"[{c.locator}]"
@@ -108,12 +100,7 @@ def _chain():
 
 
 def cited(text: str, chunks: list[Chunk]) -> list[Chunk]:
-    """The chunks the answer actually leans on - rule 2 makes every locator appear verbatim.
-
-    Both sides are NFKC-normalised because the generator writes U+202F, a narrow no-break space,
-    where the locator has an ordinary one: measured at 21 of 62 answers whose citations a raw
-    substring match could not see. NFKC leaves the curly quotes in definition locators alone.
-    """
+    """The chunks the answer actually cites, matched after NFKC normalisation."""
     normal = unicodedata.normalize("NFKC", text)
     return [c for c in chunks if _locator_re(c.locator).search(normal)]
 

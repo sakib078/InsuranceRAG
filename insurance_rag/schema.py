@@ -1,8 +1,4 @@
-"""The chunk contract.
-
-Every ingested document, HTML or PDF, produces `Chunk` objects and nothing else.
-Written before any ingestion code so both dialects target the same shape.
-"""
+"""The chunk contract: every ingested document produces `Chunk` objects and nothing else."""
 
 from __future__ import annotations
 
@@ -59,7 +55,6 @@ class Chunk:
             raise ValueError(f"{self.chunk_id}: doc_type {self.doc_type!r} cannot be ingested")
         if self.token_count <= 0:
             raise ValueError(f"{self.chunk_id}: token_count must be positive")
-        # The id still has to encode doc_id and ordinal, so drift is caught; an optional
-        # lowercase prefix distinguishes one corpus from another.
+        # The id must encode doc_id and ordinal; an optional lowercase prefix names the corpus.
         if not re.fullmatch(rf"{re.escape(self.doc_id)}:[a-z]*{self.ordinal:04d}", self.chunk_id):
             raise ValueError(f"{self.chunk_id}: does not match doc_id/ordinal")

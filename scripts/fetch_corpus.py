@@ -1,13 +1,5 @@
 #!/usr/bin/env python
-"""Fetch the scriptable half of the corpus from `data/manifest.csv`.
-
-    python scripts/fetch_corpus.py --dry-run           # show the plan, touch nothing
-    python scripts/fetch_corpus.py                     # fetch phase v1, verify checksums
-    python scripts/fetch_corpus.py --update-checksums  # fetch and record new checksums
-
-`access=manual` rows are listed, never fetched. Raw bytes are written untouched.
-Exit code is non-zero on any failure or checksum mismatch, so this is safe in CI.
-"""
+"""Fetch the scriptable half of the corpus from `data/manifest.csv`."""
 
 from __future__ import annotations
 

@@ -1,8 +1,4 @@
-"""The corpus manifest: one row per source document.
-
-`data/manifest.csv` is hand-authored and committed; the documents themselves are not.
-It records provenance, access route, licence, and a content checksum per document.
-"""
+"""The corpus manifest: one row per source document, loaded from data/manifest.csv."""
 
 from __future__ import annotations
 

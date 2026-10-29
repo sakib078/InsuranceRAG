@@ -1,15 +1,4 @@
-"""OpenAI-compatible chat endpoints. One table for the generator and the eval judges.
-
-Every provider here speaks the OpenAI wire format, so a single `ChatOpenAI` with a `base_url`
-reaches all of them and no provider SDK is needed. Keeping generation and judging apart is
-deliberate: separate budgets, and a model family never grades its own output.
-
-Groq is the default for generation, Gemini the judge. Three providers were wired and removed:
-Cerebras returned 402 with no active trial; OpenRouter is kept only as the last judge fallback - 50 requests/day cannot carry a
-run, but it can finish one. A local Ollama judge (qwen2.5:3b, the largest that fits 8 GB beside
-pgvector) returned False on every domain case while passing trivial controls - no
-discriminative power, which is worse than no judge because it still produces numbers.
-"""
+"""OpenAI-compatible chat endpoints: one table for the generator and the eval judges."""
 
 from __future__ import annotations
 
@@ -39,15 +28,13 @@ PROVIDERS: dict[str, tuple[str, str, str]] = {
         "gemini_eval_key",
         "aistudio.google.com/apikey",
     ),
-    # Free tier covers the ministral sizes only: medium, small and magistral all answer 429
-    # `rate_limited` with no quota at all, not a per-second ceiling.
+    # Free tier covers the ministral sizes only.
     "mistral": (
         "https://api.mistral.ai/v1",
         "mistral_api_key",
         "console.mistral.ai - needs phone verification and a data-training opt-in",
     ),
-    # Lists far more models than a free account may call; the rest return 404 "Function ...
-    # Not found for account". Slow - ~22s a call on the one model that works.
+    # Lists far more models than a free account may call; slow, ~22s a call.
     "nvidia": (
         "https://integrate.api.nvidia.com/v1",
         "nvidia_api_key",
@@ -83,8 +70,7 @@ def judge_chain() -> list[tuple[str, str]]:
     ]
 
 
-#: Candidates whose budget ran out, and the ones that actually served. Process-lifetime, because
-#: a spent daily quota does not come back mid-run and re-asking only wastes another request.
+#: Judge candidates whose budget ran out, and those that served; process-lifetime.
 _exhausted: set[tuple[str, str]] = set()
 _served: dict[tuple[str, str], int] = {}
 

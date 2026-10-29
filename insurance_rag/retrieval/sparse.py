@@ -1,16 +1,4 @@
-"""BM25 lexical retrieval, in the table pgvector already owns - see docs/plan.md, Phase 4.
-
-Dense search discards surface form by design, which is what lets a claimant's wording reach the
-regulation's. The same property destroys `s. 31`: a citation is an identifier, not a meaning.
-This is the other channel.
-
-BM25 rather than `ts_rank_cd` because ranking here turns on *rare* terms. A clause number appears
-in one chunk; "insurance" appears in nearly all of them. `ts_rank_cd` cannot tell those apart -
-it has no inverse document frequency - and the measured cost was 7 broken questions against 1
-rescued. See `artifacts/sparse_tsrank.py` for that arm and its numbers.
-
-Needs ParadeDB's `pg_search`; the stock pgvector image does not carry it.
-"""
+"""BM25 lexical retrieval in pgvector's own table (docs/plan.md, Phase 4); needs ParadeDB."""
 
 from __future__ import annotations
 
@@ -84,8 +72,7 @@ def search_sparse(
         query = _TANTIVY_SPECIAL.sub(" ", query).lower()
     params: dict = {"query": query,"collection": settings.collection_name, "k": k}
 
-    # Every collection lives in one heap keyed only by collection_id; a query that forgets it
-    # reads another arm's rows. Filters mirror the dense side's JSONB predicates.
+    # Always scope by collection_id; filters mirror the dense side's JSONB predicates.
     filters = ""
     if role_filter:
         filters += " AND e.cmetadata ->> 'chunk_role' = ANY(%(roles)s)"
