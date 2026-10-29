@@ -1,9 +1,4 @@
-"""Index data/chunks/*.jsonl into pgvector. Idempotent - reruns upsert by chunk_id.
-
-Two modes. Without `--embeddings` the bi-encoder runs here, which is hours on CPU. With
-`--embeddings DIR` it reads the vectors `notebooks/embed_colab.ipynb` produced on a GPU and
-inserts them directly, so this becomes plain Postgres writes.
-"""
+"""Index data/chunks/*.jsonl into pgvector, embedding here or from `--embeddings DIR`."""
 
 from __future__ import annotations
 
@@ -47,8 +42,7 @@ def main() -> None:
     parser.add_argument("--chunking", choices=("clause", "uniform"), default="clause")
     args = parser.parse_args()
 
-    # Before anything opens the store: the collection and the chunk directory are both cached
-    # per process, so choosing late would write the uniform corpus into the clause-aware index.
+    # Choose the corpus before anything opens the store; both are cached per process.
     settings.chunking = Chunking(args.chunking)
 
     pattern = f"{args.doc_id}.jsonl" if args.doc_id else "*.jsonl"

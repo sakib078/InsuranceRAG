@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" width="1200" height="900" font-family="Segoe UI, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="900" fill="#ffffff"/>
+
+  <text x="30" y="36" font-size="20" font-weight="700" fill="#0f172a">Phase 1 — Ingestion: sources to an indexed store</text>
+  <text x="30" y="58" font-size="13" fill="#64748b">Runs once, offline. Chunking (steps 1-5) then embed + index (steps 6-7). Nothing on the query path writes to Postgres.</text>
+
+  <!-- source -->
+  <rect x="30" y="85" width="230" height="70" rx="8" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="145" y="107" text-anchor="middle" font-weight="700">data/manifest.csv</text>
+  <text x="145" y="125" text-anchor="middle">11 v1 documents</text>
+  <text x="145" y="143" text-anchor="middle">load_manifest()</text>
+
+  <rect x="320" y="85" width="230" height="70" rx="8" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="435" y="107" text-anchor="middle" font-weight="700">scripts/ingest.py</text>
+  <text x="435" y="125" text-anchor="middle">routes on row.access</text>
+  <text x="435" y="143" text-anchor="middle">script = HTML · manual = PDF</text>
+
+  <line x1="260" y1="120" x2="318" y2="120" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- fork -->
+  <path d="M435,155 V182 H165 V208" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <path d="M435,182 H785 V208" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="30" y="210" width="270" height="110" rx="8" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="165" y="232" text-anchor="middle" font-weight="700" fill="#1d4ed8">webpages.py — e-Laws HTML</text>
+  <text x="165" y="252" text-anchor="middle">fetch_html(): cached in data/raw_html</text>
+  <text x="165" y="270" text-anchor="middle">units_from_html(): walk the DOM</text>
+  <text x="165" y="288" text-anchor="middle">section · subsection · definition</text>
+  <text x="165" y="306" text-anchor="middle">tables kept whole</text>
+
+  <rect x="620" y="210" width="330" height="110" rx="8" fill="#fef3c7" stroke="#d97706"/>
+  <text x="785" y="232" text-anchor="middle" font-weight="700" fill="#b45309">pdf.py — FSRA / OAP PDFs</text>
+  <text x="785" y="252" text-anchor="middle">Docling markdown + PyMuPDF pages</text>
+  <text x="785" y="270" text-anchor="middle">heading stack gives the locator</text>
+  <text x="785" y="288" text-anchor="middle">page lookup · scanned pages skipped</text>
+  <text x="785" y="306" text-anchor="middle">Docling drops pages → fall back to p. N</text>
+
+  <!-- merge -->
+  <path d="M165,320 V348 H480 V372" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <path d="M785,320 V348 H720 V372" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="330" y="374" width="540" height="76" rx="8" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="600" y="396" text-anchor="middle" font-weight="700">Structural units (langchain Documents)</text>
+  <text x="600" y="416" text-anchor="middle">locator_path · ancestor_path · heading · page · is_table</text>
+  <text x="600" y="434" text-anchor="middle">one unit per subsection, definition or heading block</text>
+
+  <line x1="600" y1="450" x2="600" y2="488" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="330" y="490" width="540" height="104" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="600" y="512" text-anchor="middle" font-weight="700" fill="#15803d">split.py — to_chunks()</text>
+  <text x="600" y="532" text-anchor="middle">over 736 body tokens → size splitter, 120 overlap · tables never split</text>
+  <text x="600" y="550" text-anchor="middle">locator = citation + " s. " + path  (#2, #3 if split)</text>
+  <text x="600" y="568" text-anchor="middle">context header prepended: title (cite) — heading trail</text>
+  <text x="600" y="586" text-anchor="middle">chunk_id = doc_id : ordinal · token_count on the Qwen3 tokenizer</text>
+
+  <rect x="910" y="490" width="260" height="104" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="1040" y="512" text-anchor="middle" font-weight="700" fill="#15803d">roles.py — rules only</text>
+  <text x="1040" y="532" text-anchor="middle">classify_role() → chunk_role</text>
+  <text x="1040" y="550" text-anchor="middle">defined_terms_in() → terms</text>
+  <text x="1040" y="568" text-anchor="middle">harvest_terms() runs first,</text>
+  <text x="1040" y="586" text-anchor="middle">over the whole loaded corpus</text>
+  <line x1="870" y1="542" x2="908" y2="542" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <line x1="600" y1="594" x2="600" y2="628" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="330" y="630" width="540" height="76" rx="8" fill="#e2e8f0" stroke="#475569"/>
+  <text x="600" y="652" text-anchor="middle" font-weight="700">Chunk — frozen, self-validating</text>
+  <text x="600" y="672" text-anchor="middle">bad locator, doc_type or id → ValueError, the run stops</text>
+  <text x="600" y="690" text-anchor="middle">written to data/chunks/{doc_id}.jsonl</text>
+
+  <!-- embed + index lane -->
+  <path d="M330,668 H145 V756" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="200" y="738" font-size="13" font-weight="700" fill="#64748b">EMBED + INDEX — still ingestion (scripts/index.py, scripts/migrate_bm25.py)</text>
+
+  <rect x="30" y="758" width="230" height="84" rx="8" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="145" y="780" text-anchor="middle" font-weight="700">scripts/index.py</text>
+  <text x="145" y="800" text-anchor="middle">read_chunks()</text>
+  <text x="145" y="818" text-anchor="middle">idempotent</text>
+
+  <rect x="300" y="758" width="250" height="84" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="425" y="780" text-anchor="middle" font-weight="700" fill="#6d28d9">Embed chunk text</text>
+  <text x="425" y="800" text-anchor="middle">bi-encoder, normalised</text>
+  <text x="425" y="818" text-anchor="middle">header included · no prompt</text>
+
+  <rect x="590" y="758" width="330" height="84" rx="8" fill="#e2e8f0" stroke="#475569"/>
+  <text x="755" y="780" text-anchor="middle" font-weight="700">add_chunks() → Postgres</text>
+  <text x="755" y="800" text-anchor="middle">langchain_pg_embedding: id · vector · document · JSONB</text>
+  <text x="755" y="818" text-anchor="middle">upsert by id · collection per encoder × chunking</text>
+
+  <rect x="960" y="758" width="210" height="84" rx="8" fill="#fef3c7" stroke="#d97706"/>
+  <text x="1065" y="780" text-anchor="middle" font-weight="700" fill="#b45309">BM25 index</text>
+  <text x="1065" y="800" text-anchor="middle">migrate_bm25.py</text>
+  <text x="1065" y="818" text-anchor="middle">pg_search on the document</text>
+
+  <line x1="260" y1="800" x2="298" y2="800" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="550" y1="800" x2="588" y2="800" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="920" y1="800" x2="958" y2="800" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <text x="30" y="880" font-size="12" fill="#64748b">Code for the embed + index step lives in insurance_rag/retrieval/store.py because the query path reads the same store; only its writes are ingestion.</text>
+</svg>

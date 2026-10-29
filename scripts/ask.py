@@ -1,7 +1,4 @@
-"""Ask the corpus one question: answer, citation blocks, licence line. Traces to traces.jsonl.
-
-`python -m scripts.ask "is physiotherapy covered after a minor injury?"`
-"""
+"""Ask the corpus one question: answer, citation blocks, licence line. Traces to traces.jsonl."""
 
 from __future__ import annotations
 

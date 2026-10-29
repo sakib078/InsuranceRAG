@@ -16,13 +16,10 @@ __all__ = [
 
 CHUNKS_DIR = DATA_DIR / "chunks"
 
-#: Share of a provision a uniform window must hold to count as having retrieved it.
-#: Set by run_eval before the first score; see evals/uniform.py for why 0.5.
+#: Share of a provision a uniform window must hold to count as retrieved.
 COVERAGE = 0.5
 
-#: Rank depth every recall metric is scored at, and the number in its key. Set by run_eval from
-#: `-k` before the first score. Read at call time, never bound as a default argument, or a row
-#: run at another depth would silently be scored at this one.
+#: Rank depth every recall metric is scored at; set by run_eval from `-k`.
 DEPTH = settings.rerank_top_k
 
 
@@ -102,8 +99,7 @@ def citation_accuracy(
     return sum(1 for g in gold if _found(g, cited)) / len(gold)
 
 
-# The LangSmith adapters return a result object with `score: None` for records that were not applicable or did not complete. 
-# This excludes them from averages while avoiding errors caused by returning a bare `None`.
+# LangSmith adapters return `score: None` for inapplicable or incomplete records.
 
 def _labels(reference_outputs: dict) -> dict:
     return reference_outputs or {}
@@ -115,11 +111,7 @@ def _skip(key: str) -> dict:
 
 
 def _ran(outputs: dict, *keys: str) -> bool:
-    """Did the target finish? It writes its whole dict at once, so a missing key means it raised.
-
-    Presence, not truthiness: `retrieved_locators == []` is a real (bad) retrieval, while an
-    absent key can only mean the dict was never built - scoring that is inventing a measurement.
-    """
+    """Did the target finish: are all the given keys present in its outputs."""
     return bool(outputs) and all(key in outputs for key in keys)
 
 

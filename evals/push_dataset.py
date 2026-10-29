@@ -1,10 +1,4 @@
-"""Push evals/golden.jsonl to a LangSmith dataset.
-
-`python -m evals.push_dataset`
-
-git holds the labels; LangSmith runs the experiments. Re-running replaces the dataset's examples
-rather than doubling them.
-"""
+"""Push evals/golden.jsonl to a LangSmith dataset."""
 
 from __future__ import annotations
 
@@ -20,13 +14,7 @@ LABEL_FIELDS = ("id", "hop", "gold_locators", "exclusion_locators", "answerable"
 
 
 def to_example(record: dict) -> dict:
-    """`question` -> inputs; the answer AND the labels -> outputs.
-
-    Labels must live in `outputs`, not `metadata`: LangSmith hands an evaluator
-    `example.outputs` as `reference_outputs` and never hands it metadata. Labels put in
-    metadata arrive empty, and every evaluator then skips the record without erroring.
-    Metadata keeps a copy, which is what the LangSmith UI filters on.
-    """
+    """`question` -> inputs; the answer AND the labels -> outputs."""
     labels = {field: record[field] for field in LABEL_FIELDS}
     return {
         "inputs": {"question": record["question"]},

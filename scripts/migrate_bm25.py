@@ -1,24 +1,10 @@
-"""Create the pg_search BM25 index on langchain_pg_embedding. Idempotent.
-
-Replaces the tsvector + GIN index `artifacts/migrate_fts.py` builds. That one ranked with
-`ts_rank_cd`, which has no inverse document frequency, so a clause number counted no more than
-the word "insurance" - measured at 1 question rescued against 7 broken. BM25 adds IDF, term
-frequency saturation and length normalisation.
-
-Only `document` is indexed. The locator is already inside it - `context_header` prepends it to
-every chunk body - and BM25 weights it heavily on its own because clause numbers are rare. The
-two-field `setweight` trick existed only to work around ts_rank having no IDF.
-
-Needs ParadeDB. The stock pgvector image does not carry pg_search.
-"""
+"""Create the pg_search BM25 index on langchain_pg_embedding. Idempotent."""
 
 from __future__ import annotations
 
 from insurance_rag.retrieval.sparse import INDEX_NAME, psycopg_dsn
 
-#: pg_search changed its index syntax across releases; whichever form this server takes, wins.
-#: `USING bm25` first - 0.25 accepts `USING paradedb` as an access method but the query operator
-#: still refuses the index, which fails at search time rather than here.
+#: Index DDL per pg_search release syntax; the first form this server accepts wins.
 CREATE = (
     f"CREATE INDEX IF NOT EXISTS {INDEX_NAME} ON langchain_pg_embedding "
     "USING bm25 (id, document) WITH (key_field='id')",
@@ -55,8 +41,7 @@ def main() -> None:
             raise SystemExit("pg_search did not install - is this a ParadeDB image?")
         print(f"pg_search {row[0]}")
 
-        # key_field has to be a unique column, and pg_search has not always accepted text keys.
-        # langchain's id is a varchar, so fail here with the reason rather than on a broken index.
+        # key_field must be unique and pg_search has not always accepted text keys.
         cur.execute(KEY_TYPE)
         print(f"key column id is {cur.fetchone()[0]}")
 

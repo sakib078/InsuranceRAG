@@ -47,11 +47,7 @@ def row_id(chunk: Chunk) -> str:
 
 @lru_cache(maxsize=1)
 def vector_store():
-    """One collection per encoder and chunking - see docs/plan.md, Deviation 8 and Phase 3.
-
-    Cached for the process, so anything switching `settings.chunking` must do it before the
-    first call or it will silently read the wrong corpus.
-    """
+    """One collection per encoder and chunking - see docs/plan.md, Deviation 8 and Phase 3."""
     from langchain_postgres import PGVector
 
     return PGVector(

@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 960" width="1200" height="960" font-family="Segoe UI, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b91c1c"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="960" fill="#ffffff"/>
+
+  <text x="30" y="36" font-size="20" font-weight="700" fill="#0f172a">Phase 3 — Generation: chunks to a cited answer</text>
+  <text x="30" y="58" font-size="13" fill="#64748b">chain.py owns the loop. The model sees only the excerpts it is handed, and citation blocks are built from chunks, never from the model's prose.</text>
+
+  <rect x="30" y="90" width="170" height="60" rx="8" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="115" y="114" text-anchor="middle" font-weight="700">Question</text>
+  <text x="115" y="132" text-anchor="middle">scripts/ask.py</text>
+
+  <rect x="260" y="90" width="260" height="60" rx="8" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="390" y="114" text-anchor="middle" font-weight="700">answer(question)</text>
+  <text x="390" y="132" text-anchor="middle">walks the ladder k = 5, then 25</text>
+
+  <line x1="200" y1="105" x2="258" y2="105" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <line x1="390" y1="150" x2="390" y2="198" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="260" y="200" width="260" height="60" rx="8" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="390" y="224" text-anchor="middle" font-weight="700" fill="#1d4ed8">search_corpus(question, k)</text>
+  <text x="390" y="242" text-anchor="middle">Phase 2 → list[Chunk]</text>
+
+  <line x1="390" y1="260" x2="390" y2="308" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="260" y="310" width="260" height="76" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="390" y="332" text-anchor="middle" font-weight="700" fill="#15803d">within_budget()</text>
+  <text x="390" y="352" text-anchor="middle">at most 6000 tokens</text>
+  <text x="390" y="370" text-anchor="middle">drops lowest-ranked · keeps at least one</text>
+
+  <line x1="390" y1="386" x2="390" y2="434" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="260" y="436" width="260" height="90" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="390" y="458" text-anchor="middle" font-weight="700" fill="#15803d">format_context()</text>
+  <text x="390" y="478" text-anchor="middle">"[locator]" + chunk text</text>
+  <text x="390" y="496" text-anchor="middle">REVOKED marker from the manifest</text>
+  <text x="390" y="514" text-anchor="middle">model can only cite what is shown</text>
+
+  <line x1="390" y1="526" x2="390" y2="574" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="260" y="576" width="260" height="84" rx="8" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="390" y="598" text-anchor="middle" font-weight="700">Prompt</text>
+  <text x="390" y="618" text-anchor="middle">SYSTEM: six rules, exact refusal</text>
+  <text x="390" y="636" text-anchor="middle">USER: excerpts + question</text>
+  <text x="390" y="652" text-anchor="middle" font-size="11" fill="#475569">no history · no tools · one shot</text>
+
+  <line x1="520" y1="618" x2="598" y2="618" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="600" y="576" width="260" height="84" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="730" y="598" text-anchor="middle" font-weight="700" fill="#6d28d9">LLM (generator)</text>
+  <text x="730" y="618" text-anchor="middle">open-weight model, free tier</text>
+  <text x="730" y="636" text-anchor="middle">provider and model are config keys</text>
+  <text x="730" y="652" text-anchor="middle" font-size="11" fill="#475569">max_tokens 1024</text>
+
+  <line x1="730" y1="660" x2="730" y2="708" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="600" y="710" width="260" height="76" rx="8" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="730" y="734" text-anchor="middle" font-weight="700">Reply is the refusal?</text>
+  <text x="730" y="754" text-anchor="middle">"This corpus does not address that."</text>
+  <text x="730" y="772" text-anchor="middle" font-size="11" fill="#475569">tested as a substring of the reply</text>
+
+  <!-- retry loop -->
+  <path d="M600,748 H235 V125 H258" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrRed)"/>
+  <text x="225" y="430" text-anchor="end" fill="#b91c1c" font-weight="700">yes, k = 5:</text>
+  <text x="225" y="448" text-anchor="end" fill="#b91c1c" font-weight="700">retry at k = 25</text>
+  <text x="225" y="466" text-anchor="end" fill="#b91c1c" font-size="11">a second LLM call</text>
+  <text x="730" y="806" text-anchor="middle" fill="#b91c1c" font-size="12">yes at k = 25: Answer(REFUSAL, no chunks)</text>
+
+  <!-- no branch -->
+  <line x1="860" y1="748" x2="928" y2="748" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="894" y="740" text-anchor="middle" font-size="12" fill="#475569">no</text>
+
+  <rect x="930" y="700" width="240" height="96" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="1050" y="722" text-anchor="middle" font-weight="700" fill="#15803d">cited(text, retrieved)</text>
+  <text x="1050" y="742" text-anchor="middle">NFKC-normalised, whole-locator</text>
+  <text x="1050" y="760" text-anchor="middle">match against the answer</text>
+  <text x="1050" y="778" text-anchor="middle">none cited → keep all retrieved</text>
+
+  <line x1="1050" y1="796" x2="1050" y2="838" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="930" y="840" width="240" height="60" rx="8" fill="#f1f5f9" stroke="#64748b"/>
+  <text x="1050" y="864" text-anchor="middle" font-weight="700">Answer</text>
+  <text x="1050" y="882" text-anchor="middle">text · cited chunks · retrieved</text>
+
+  <line x1="930" y1="870" x2="862" y2="870" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <rect x="480" y="826" width="380" height="104" rx="8" fill="#fef3c7" stroke="#d97706"/>
+  <text x="670" y="848" text-anchor="middle" font-weight="700" fill="#b45309">scripts/ask.py renders it</text>
+  <text x="670" y="868" text-anchor="middle">render_citation() per cited chunk, from the manifest</text>
+  <text x="670" y="886" text-anchor="middle">REVOKED badge · "Not an official version" · licence lines</text>
+  <text x="670" y="904" text-anchor="middle">one trace line appended per query</text>
+  <text x="670" y="920" text-anchor="middle" font-size="11" fill="#475569">a made-up bracket in the prose cannot become a citation block</text>
+</svg>

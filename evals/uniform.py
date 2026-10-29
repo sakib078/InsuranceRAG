@@ -1,12 +1,4 @@
-"""Resolve gold locators against uniform windows, and report what that resolution can measure.
-
-A clause locator cannot match a window that cut across it, so a gold provision counts as found
-when a window holds at least `coverage` of it. The threshold is not a free parameter: below the
-value where an *oracle* retriever scores 1.000, the metric measures how well the chunker happens
-to align with provision boundaries rather than how well retrieval works.
-
-`python -m evals.uniform` prints the ceilings, which is the check to run before believing a row.
-"""
+"""Resolve gold locators against uniform windows and report the oracle ceilings."""
 
 from __future__ import annotations
 
@@ -33,12 +25,7 @@ def gold_map() -> dict[str, dict[str, float]]:
 
 
 def windows_for(gold: str, coverage: float) -> set[str]:
-    """Every window holding enough of this provision to count as having retrieved it.
-
-    A gold label may carry the ` #2` suffix `split.py` adds when a provision overflows the
-    clause-aware token budget. The uniform arm never splits by size, so the provision is
-    contiguous here and the suffix has no counterpart - fall back to the whole provision.
-    """
+    """Every window holding enough of this provision to count as retrieved."""
     held = gold_map().get(gold) or gold_map().get(gold.rsplit(" #", 1)[0], {})
     return {w for w, share in held.items() if share >= coverage}
 

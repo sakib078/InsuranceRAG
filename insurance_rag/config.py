@@ -1,8 +1,4 @@
-"""Central configuration.
-
-The encoder is an eval variable, not a deployment profile: both models under test run the
-identical pipeline over byte-identical chunks. See `docs/plan.md`, Deviation 8.
-"""
+"""Central configuration; the encoder is an eval variable (docs/plan.md, Deviation 8)."""
 
 from __future__ import annotations
 
@@ -52,12 +48,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="IRAG_", extra="ignore")
 
     encoder: Encoder = Encoder.QWEN3
-    #: clause | uniform. Switches the chunk directory and the pgvector collection together,
-    #: so the two corpora can never be read through each other.
+    #: clause | uniform; switches the chunk directory and pgvector collection together.
     chunking: Chunking = Chunking.CLAUSE
 
-    # --- storage ---
-    # No default: credentials live in .env only, so none can be committed by accident.
+    # --- storage (no DSN default; credentials live in .env only) ---
     postgres_dsn: str = Field(..., description="psycopg3 DSN, e.g. postgresql+psycopg://...")
 
     # --- retrieval knobs (every one of these is an eval variable) ---
@@ -65,15 +59,10 @@ class Settings(BaseSettings):
     sparse_top_k: int = 20
     fusion_top_k: int = 20
     rerank_top_k: int = 5
-    #: The ladder's wide rung. Separate from `fusion_top_k` so widening the retry does not also
-    #: resize the fusion pool, which is a measured variable in every recorded row.
+    #: The ladder's wide rung, separate from `fusion_top_k`.
     ladder_top_k: int = 25
     rrf_k: int = 60  # reciprocal rank fusion smoothing constant
-    #: Per-channel RRF weights. Equal weighting let sparse *inject* candidates - a junk hit at
-    #: sparse rank 1 ties dense rank 1 at any `rrf_k`, and with 5 slots that is round-robin.
-    #: Below ~0.5 sparse can only *promote* what dense already found, which is all an unreliable
-    #: channel should be trusted to do. Measured: equal weights cost 0.737 -> 0.632 single and
-    #: 0.450 -> 0.200 exclusion.
+    #: Per-channel RRF weights; below ~0.5 sparse can only promote what dense found.
     dense_weight: float = 1.0
     sparse_weight: float = 0.7
 
@@ -82,54 +71,24 @@ class Settings(BaseSettings):
     uniform_chunk_tokens: int = 512  # baseline row only
     uniform_overlap_tokens: int = 64
 
-    # --- generation (open-weight model on an OpenAI-compatible endpoint) ---
-    # groq | gemini - see insurance_rag/providers.py.
+    # --- generation (groq | gemini, see insurance_rag/providers.py) ---
     generation_provider: str = "groq"
     # Optional so ingestion and retrieval run without it; `chain.py` fails loudly when it is needed.
     groq_api_key: str | None = Field(default=None, description="IRAG_GROQ_API_KEY, from .env")
     generation_model: str = "openai/gpt-oss-120b"
 
-    # --- evaluation: the judge runs off a different provider, for a separate rate limit
-    # and to keep a model family from grading its own output. These keys are unprefixed in .env.
+    # --- evaluation: judge runs off a different provider; keys are unprefixed in .env ---
     gemini_eval_key: str | None = Field(default=None, validation_alias="GEMINI_API_EVAL_KEY")
     openrouter_key: str | None = Field(default=None, validation_alias="OPENROUTER_KEY")
     mistral_api_key: str | None = Field(default=None, validation_alias="MISTRAL_API_KEY")
     nvidia_api_key: str | None = Field(default=None, validation_alias="NVIDIA_API_KEY")
-    # pydantic-settings reads .env into this object, never into os.environ, so the LangSmith
-    # client has to be handed the key rather than left to find it.
+    # pydantic-settings never fills os.environ, so the LangSmith client is handed this key.
     langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
     langsmith_dataset: str = "insurance-rag-golden"
-    # See insurance_rag/providers.py for the options. A different provider from the generator
-    # means a separate budget; a different family means it cannot favour its own phrasing.
-    # Ordered "provider/model" candidates, split on the FIRST slash so Groq's
-    # "qwen/qwen3.8-27b" survives. Failover moves down the list as each budget runs out.
-    #   3.5-flash-lite  15 RPM / 500 RPD  - best judge with capacity for a whole run
-    #   3.1-flash-lite  15 RPM / 500 RPD  - same limits, separate budget
-    #   ministral       ~1B tokens/month EACH - Mistral meters per model, so 14b and 8b are
-    #     14b / 8b      two separate budgets, ~10s a call on the real prompt. The first
-    #                   candidates outside Google: tiers 1 and 2 share a provider, so one
-    #                   quota change ends both. Mistral's free tier covers the ministral sizes
-    #                   only - medium, small and magistral all answer 429 with no quota at all.
-    #                   ministral-3b is NOT here: it returns a malformed structure against the
-    #                   real CorrectnessGrade schema, and a schema error is not exhaustion, so
-    #                   `with_failover` would let it raise and end the run.
-    #   groq qwen       200k TPD of its own: Groq quotas are per-model, so judging here never
-    #                   touches the budget generation spends on gpt-oss-120b
-    #   glm-5.3-flash   ~22s a call, so ~45 min for a run - too slow to depend on, fast enough
-    #                   to finish one
-    #   openrouter      its free pool returns 429 "Provider returned error" under load - fine
-    #                   as a fallback, wrong as a dependency
-    #   deepseek-v4     absolute last resort: ~94s a call is over three hours for a full run,
-    #                   which still beats a run that dies. Every entry here passed a structured
-    #                   output probe and a three-case discrimination check.
-    # Gemini needs the "models/" prefix on its OpenAI-compatible endpoint. gemma-4-31b-it is
-    # NOT in the chain on Gemini - it returns 500 above max_tokens=16 there, and a 5xx is not
-    # exhaustion, so it would raise and end the run rather than fall through.
+    # Ordered "provider/model" judge candidates; see insurance_rag/providers.py.
     judge_chain: str = (
         "gemini/models/gemini-3.5-flash-lite,"
         "gemini/models/gemini-3.1-flash-lite,"
-        "mistral/ministral-14b-latest,"
-        "mistral/ministral-8b-latest,"
         "groq/qwen/qwen3.8-27b,"
         "nvidia/z-ai/glm-5.3-flash,"
         "openrouter/google/gemma-4-31b-it:free,"

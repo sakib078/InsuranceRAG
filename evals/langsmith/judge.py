@@ -1,11 +1,4 @@
-"""The grader LLM, shared by all four evaluators.
-
-Deliberately a different provider and family from the generator: a judge on the generator's
-provider would share its rate limit, and a model grading its own family favours its own
-phrasing. `IRAG_JUDGE_CHAIN` lists candidates in preference order and `with_failover` steps
-down it as each budget runs out, so one exhausted quota does not end a run. Endpoints and the
-routing live in `insurance_rag/providers.py`.
-"""
+"""The grader LLM, shared by all four evaluators."""
 
 from __future__ import annotations
 

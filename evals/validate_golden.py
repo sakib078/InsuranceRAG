@@ -1,8 +1,4 @@
-"""Resolve every gold locator against data/chunks/*.jsonl. Run before any metric is computed.
-
-A gold label that matches no chunk scores zero forever and reads as a retrieval failure, so
-this is the guard that keeps the golden set honest as the corpus is re-chunked.
-"""
+"""Resolve every gold locator against data/chunks/*.jsonl before any metric runs."""
 
 from __future__ import annotations
 

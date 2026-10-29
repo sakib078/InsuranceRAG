@@ -1,15 +1,4 @@
-"""Score the golden set. Two suites, because they cost very different amounts.
-
-    python -m evals.run_eval --suite retrieval   --config dense_clause_aware
-    python -m evals.run_eval --suite generation  --config dense_clause_aware
-
-`retrieval` makes no model calls at all and runs offline: recall@5 by hop and exclusion recall,
-scored against the hand labels. `generation` answers all 56 questions and adds the LangSmith
-judges in `BUILT_INS` plus citation accuracy, so it runs through `client.evaluate` and needs
-both keys.
-
-`--config` only names the row; the behaviour comes from whatever `search_corpus` currently does.
-"""
+"""Score the golden set in two suites, retrieval and generation."""
 
 from __future__ import annotations
 
@@ -39,15 +28,13 @@ LABEL_FIELDS = ("id", "hop", "gold_locators", "exclusion_locators", "answerable"
 #: Citation accuracy needs an answer, so it only joins the generation suite.
 RETRIEVAL_EVALUATORS = (recall_single, recall_multi, exclusion_recall_eval)
 CUSTOM_EVALUATORS = (*RETRIEVAL_EVALUATORS, citation_accuracy_eval)
-#: Printed in this order. `{k}` is the depth the row was scored at, so a recall@20 row orders
-#: the same way a recall@5 one does.
+#: Metric print order; `{k}` is the depth the row was scored at.
 METRIC_ORDER = (
     "recall@{k}_single", "recall@{k}_multi", "exclusion_recall", "citation_accuracy",
     "correctness", "relevance", "groundedness", "retrieval_relevance",
 )
 
-#: A failed target is skipped rather than scored, so a few of them only shrink n. Past this share
-#: the surviving records are no longer the golden set, and the row would be a different experiment.
+#: Max share of failed targets tolerated before the row is invalid.
 ERROR_TOLERANCE = 0.10
 
 def retrieval_shape() -> str:
@@ -71,11 +58,7 @@ def retrieval_target(question: str, k: int) -> dict:
 
 
 def generation_target(question: str, k: int | None = None) -> dict:
-    """The product as shipped when `k` is None; a pinned width costs far fewer tokens.
-
-    The ladder re-asks at k=20 after every refusal, so the 17 unanswerable records each pay for
-    a second, wider prompt to confirm an answer that was already right. Pinning k skips that.
-    """
+    """The product as shipped when `k` is None; a pinned width costs far fewer tokens."""
     from insurance_rag.generation.chain import answer
 
     result = answer(question, k=k)
@@ -209,8 +192,7 @@ def write(record: dict, config: str, suite: str) -> None:
     path = RESULTS_DIR / f"{config}_{suite}.json"
     path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 
-    # Append only after a newline: without this, a file left unterminated by a hand edit gets
-    # the next record glued onto its last line, and that line stops being readable JSON.
+    # Append only after a newline so a record is never glued onto an unterminated line.
     history = RESULTS_DIR / HISTORY_FILE
     unterminated = history.exists() and not history.read_text(encoding="utf-8").endswith("\n")
     with history.open("a", encoding="utf-8") as fh:
@@ -239,8 +221,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    # Both the chunk directory and the pgvector collection are cached per process, so the
-    # corpus has to be chosen before anything reads either.
+    # Choose the corpus before anything reads the per-process cached chunk dir and collection.
     settings.chunking = Chunking(args.chunking)
     evaluators.COVERAGE = args.coverage
 
@@ -272,8 +253,7 @@ def main() -> None:
             **provenance,
             "records": len(records),
             "scores": summary,
-            # Always recorded, never gated on --misses: which records failed is what makes two
-            # rows diffable, and it cannot be recovered from a mean after the fact.
+            # Always recorded, never gated on --misses, so rows stay diffable.
             "misses": misses,
         },
         args.config,
