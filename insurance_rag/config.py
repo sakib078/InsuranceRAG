@@ -96,7 +96,10 @@ class Settings(BaseSettings):
     )
 
     # --- agent ---
-    max_agent_steps: int = 6
+    max_agent_steps: int = 9  # the retry path runs 9 nodes
+    agent_neighbor_window: int = 2
+    agent_context_tokens: int = 3000  # half of the 6000-token single-shot context
+    agent_token_budget: int = 185_000  # stop before Groq's 200k daily cap
     enable_web_fallback: bool = False  # must stay false for every eval run
 
     # --- tracing ---
