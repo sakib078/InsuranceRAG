@@ -29,6 +29,7 @@ def fake_retrieval(monkeypatch, chunks):
 def fake_planner(monkeypatch):
     monkeypatch.setattr(graph, "decompose", lambda question: [])
     monkeypatch.setattr(budget, "_spent", 0)
+    monkeypatch.setattr(settings, "enable_web_fallback", False)
 
 
 def test_sub_questions_become_pools(monkeypatch, chunks):

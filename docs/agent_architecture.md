@@ -2,7 +2,7 @@
 
 The build design for the LangGraph agent and the web fallback tier. Decisions and their
 reasoning live in `docs/plan.md`; iteration 1's build record is `docs/RAG_pipleline.md`.
-**Nothing here is built yet.** The design is organised by layer, in the order a question moves
+**Built and measured; see [Results so far](#results-so-far).** The design is organised by layer, in the order a question moves
 through them. Only two layers are agents (they call an LLM); the rest are tools (plain code) or
 the graph that runs them.
 
@@ -10,13 +10,13 @@ the graph that runs them.
 
 ## Why, in numbers
 
-Multi-hop recall is **0.143** (3 of 22). The ceiling at top-20 is **0.381**, and **13 of 22
+Multi-hop recall is **0.182** (4 of 22) at k=5. The ceiling at top-20 is **0.409** (9 of 22), and **13 of 22
 multi-hop questions have gold clauses outside the top 20 entirely** — one query cannot surface
 them at any depth, however it is ranked. Chunk size did not move this (Phase 3), a lexical
 channel did not (Phase 4), two cross-encoders did not (Phase 5, rejected). The one variable
 never changed is the *shape*: one question, one embedding, one pool.
 
-The agent changes what gets asked. It is the only remaining mechanism that can pass 0.381.
+The agent changes what gets asked. It is the only remaining mechanism that can pass 0.409.
 
 Exclusion recall is 0.500 at k=5 and **0.731 at k=20** — so 0.731 is what the mandatory
 exclusion pass has to beat, not 0.500.
@@ -56,7 +56,7 @@ Two agents, six tools.
 |---|---|---|---|---|---|
 | Orchestrator | Graph | the graph | `graph.py`, `run_agent` | — | none |
 | Agent state | State | — | `state.py`, `AgentState` | — | — |
-| Planner | **Agent** | `plan` | `decompose.py`, `decompose()` | — | `ministral-14b`, cached |
+| Planner | **Agent** | `plan` | `decompose.py`, `decompose()` | — | Gemini flash-lite, cached |
 | Retrieval | Tool | `gather` | `search_corpus` per sub-question + `tools.expand` | hybrid search, chunk files | none |
 | Exclusion | Tool | `exclusion_check` | `tools.exclusion_pass` | hybrid search | none |
 | Assembler | Tool | `assemble` | `search.fuse` + `within_budget` | — | none |
@@ -67,10 +67,12 @@ Two agents, six tools.
 
 ### Token budget
 
-**One Groq call per question, two with the retry.** Decomposition is Mistral and cached: 62
-fixed questions cost ~16k Mistral tokens once, **0 Groq**, and nothing on every later run.
-`agent_token_budget` (185_000) raises `BudgetExceeded` before Groq's 200k daily cap. The full
-generation row is ~135–150k Groq tokens at `agent_context_tokens=3000`.
+**One Groq call per question, two with the retry.** Decomposition is Gemini flash-lite and
+cached: 62 fixed questions cost 62 calls once, **0 Groq**, and nothing on every later run.
+`agent_token_budget` (185_000) is a process-wide total and raises `BudgetExceeded` before Groq's
+200k daily cap. **Measured:** one real question cost 8.2k tokens over two calls (~4k per call at
+`agent_context_tokens=3000`), so the full generation row is ~230–250k, not the ~135–150k first
+estimated. It does not fit one Groq day at 3000.
 
 ### The graph
 
@@ -143,21 +145,22 @@ LLM), Tool (plain code) or Graph.
 
 ```python
 class AgentState(TypedDict):
-    question: str; sub_questions: list[str]; pools: dict[str, list[Hit]]
+    question: str; sub_questions: list[str]; pools: dict[str, list[Chunk]]
     checked: list[str]; context: list[Chunk]; answer: str
-    retries: int; steps: int; tokens: int
+    retries: int; steps: int; tokens: int; web: list[WebResult]
 
 @dataclass(frozen=True)
 class AgentAnswer:
     question: str; text: str; chunks: list[Chunk]; retrieved: list[Chunk]
     checked: list[str]; steps: int; tokens: int
     cited_nothing: bool          # feeds the Final check
+    web: list[WebResult] = []    # rendered beneath a refusal, never in the prompt
 
 def run_agent(question: str, *, decompose_enabled: bool = True) -> AgentAnswer
 class BudgetExceeded(RuntimeError): ...
 ```
 
-`max_agent_steps` (6) caps the run. **Reuse, do not fork:** `format_context`, `within_budget`,
+`max_agent_steps` (10) caps the run: retry, refuse and the web tier is the longest path. **Reuse, do not fork:** `format_context`, `within_budget`,
 `cited`, `REFUSAL`, `revoked_docs`, the `SYSTEM` prompt plus one appended rule, `with_retry`,
 `fuse`. **`chain.answer()` stays untouched** so every recorded row remains reproducible.
 
@@ -166,7 +169,7 @@ class BudgetExceeded(RuntimeError): ...
 ### Planner agent
 
 **Job:** split the question into at most 3 sub-questions.
-**Type:** Agent. **Model:** `mistral/ministral-14b-latest`, cached. **File:** `decompose.py`.
+**Type:** Agent. **Model:** `gemini/models/gemini-3.1-flash-lite`, cached. **File:** `decompose.py`.
 
 ```python
 DECOMPOSE_SYSTEM: str
@@ -175,7 +178,7 @@ def build_cache(questions: list[str], path: Path) -> int
 ```
 
 Runs through the existing `providers.chat_model`, and is **cached to
-`data/decompositions.jsonl`** keyed by question hash. 62 fixed questions: ~16k Mistral tokens
+`data/decompositions.jsonl`** keyed by question hash. 62 fixed questions: 62 Gemini calls
 once, **0 Groq**, free on every later run. The cache doubles as the inspection artefact.
 
 The cap of 3 comes from the failing records: mean independent provisions per failing record is
@@ -293,9 +296,9 @@ An answer that cites nothing becomes a refusal because the citation contract in 
 no state for it: an answered state requires a clause locator. That costs the 2 of 62 uncited
 answers, which were never renderable as answers under the contract anyway.
 
-> **Open: what the retry changes.** The retry is drawn back to the Assembler, but nothing yet
-> says what differs on the second pass, and `plan.md` Phase 7 calls it a "reformulation retry",
-> which would mean going back to Retrieval. Decide before building `graph.py`.
+**What the retry changes:** the Assembler re-runs on the same pools at the full 6000-token
+`MAX_CONTEXT_TOKENS` instead of `agent_context_tokens`. No new retrieval, one more Groq call.
+`plan.md` still calls it a "reformulation retry"; that wording is stale.
 
 **Tested by:** `retries <= 1`, and a test that an uncited answer after the retry returns exactly
 `REFUSAL`.
@@ -338,9 +341,9 @@ cross-encoder meant to supply one was measured and rejected, and uncited answers
 refusals at the Final check.
 
 ```python
-def needs_supplement(result: AgentAnswer) -> bool:
-    """Refusal only - the contract renders web results beneath a refusal and nothing else."""
-    return result.text.strip() == REFUSAL
+def after_refuse(state: AgentState) -> str:          # graph.py: the edge after `refuse`
+    """The web tier runs after a refusal and only when the flag is on."""
+    return "web" if settings.enable_web_fallback else "end"
 ```
 
 No model call. Same deterministic pattern as the retry trigger.
@@ -355,7 +358,7 @@ class WebResult:
     snippet: str        # VERBATIM from the provider - never model-generated
     retrieved_at: str   # ISO date, per the contract's "URL + retrieval date"
 
-def web_supplement(question: str, *, k: int = 3) -> list[WebResult]   # stub returns []
+def web_supplement(question: str, *, k: int = 3) -> list[WebResult]   # ddgs, then SearXNG
 ```
 
 **Snippets render verbatim, never summarised.** A second LLM pass over web text is exactly where
@@ -364,11 +367,10 @@ and cost zero tokens.
 
 **`WebResult` never enters the LLM context.** Render-time only — asserted by test.
 
-**Backend deferred.** `httpx` is present either way and `scripts/fetch_corpus.py` has a usable
-politeness pattern to lift (custom UA, `Timeout(30.0)`, 3 retries, linear backoff, 1s
-inter-request delay); `ratelimit.with_retry` is the generic primitive, and `tenacity` is already
-installed if a library is preferred to the hand-rolled loops. **No search provider exists at any
-layer** — not in `pyproject.toml`, not in the lockfile, not in `.venv`.
+**Backend: `ddgs` first, SearXNG as the fallback.** `ddgs` (in the `agent` extra) needs no key;
+if it raises or finds nothing, a self-hosted SearXNG at `settings.searxng_url` is tried, and the
+fallback is skipped when that is empty. Any backend failure is logged and swallowed, so the web
+tier can never break the refusal it sits under. Swapping a provider changes only `web.py`.
 
 #### Rendering — a mechanism that does not exist yet
 
@@ -400,13 +402,15 @@ every eval is single-turn, so the per-request Agent state is all this phase need
 
 ```python
 agent_context_tokens:    int = 3000        # half of MAX_CONTEXT_TOKENS - budget-matched
-agent_neighbor_window:   int = 2
+agent_neighbor_window:   int = 0           # 0 switches neighbours off; +-2 added nothing
+agent_decompose:         bool = True       # false skips the Planner, for ablation rows
 agent_max_sub_questions: int = 3           # mean independent provisions per failing record: 2.5
-agent_token_budget:      int = 185_000     # fail before Groq's 200k, not after
-decompose_model:         str = "mistral/ministral-14b-latest"
+agent_token_budget:      int = 185_000     # process-wide; fail before Groq's 200k, not after
+decompose_model:         str = "gemini/models/gemini-3.1-flash-lite"
+searxng_url:             str = ""          # empty skips the SearXNG fallback
 ```
 
-`max_agent_steps` (6) and `enable_web_fallback` (False) already exist.
+`max_agent_steps` (10) and `enable_web_fallback` (False) also live in `config.py`.
 
 ---
 
@@ -446,7 +450,7 @@ mediocre one.
 
 ---
 
-## Spec §05 — faithful, adapted, dropped
+## Spec 05 — faithful, adapted, dropped
 
 | item | verdict |
 |---|---|
@@ -496,12 +500,36 @@ answerable one, before it earns a node.
    measured.
 5. A retrieval eval row must be byte-identical with `enable_web_fallback` on or off. If it is
    not, guard 1 has failed.
-6. Only then the generation row, ~135–150k Groq tokens at `agent_context_tokens=3000`.
+6. Only then the generation row, ~230–250k Groq tokens at `agent_context_tokens=3000` (see
+   [Token budget](#token-budget)): lower the context cap or split the run across two days.
 7. Diff `misses` against the single-shot control record by record. The 13 names are known.
+
+## Results so far
+
+Rows are written by `python -m evals.run_agent_eval` to `evals/agent_results/`; single-shot
+controls stay in `evals/results/`. Retrieval rows, 0 tokens, at about 15 chunks / 2,800 tokens:
+
+| row | chunks | single | multi | exclusion |
+|---|---|---|---|---|
+| agent, no planner | 15.0 | 0.792 | 0.273 | 0.692 |
+| agent + planner (`agent_v1`, neighbours off) | 15.9 | 0.833 | 0.318 | 0.731 |
+| single-shot `pool_k15` | 15.0 | 0.833 | 0.318 | 0.654 |
+| single-shot `pool_k25` | 25.0 | 0.875 | 0.409 | 0.769 |
+
+- Kill-check passed: 35 of 38 provisions retrieve from their own text at k=5 (0.921).
+- Exclusion is the one clear gain: 19 of 26 against 17 for the same-size control.
+- Multi-hop ties the control at 7 of 22. The union of all pools finds the same 7, so the
+  3000-token cut loses nothing: the misses are retrieval misses. Deeper sub-question pools
+  (10, 20) and a plain-words planner prompt did not help.
+- Ordinal neighbours (±2) added nothing on single or multi-hop and cost 2 exclusion records, so
+  `agent_neighbor_window` defaults to 0.
+- The generation row is not yet measured; see [Token budget](#token-budget).
+- The golden set changed after the first rows were recorded: `g-056` became multi-hop (22
+  scored, was 21), so the old 0.143 / 0.381 are now 0.182 / 0.409.
 
 ## The honest risk
 
-One query with zero tokens already scores 0.381 multi-hop. The agent must beat that **at the
+One query with zero tokens already scores 0.409 multi-hop. The agent must beat that **at the
 same chunk count** to justify the phase. If the generation row disappoints, the free checkpoints
 and per-node traces attribute it without paying for separate runs — which is the mitigation for
 building the whole graph at once.
