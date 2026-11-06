@@ -2,8 +2,9 @@
 
 The build design for the LangGraph agent and the web fallback tier. Decisions and their
 reasoning live in `docs/plan.md`; iteration 1's build record is `docs/RAG_pipleline.md`.
-**Nothing here is built yet.** The design is organised by agent, in the order a question moves
-through them.
+**Nothing here is built yet.** The design is organised by layer, in the order a question moves
+through them. Only two layers are agents (they call an LLM); the rest are tools (plain code) or
+the graph that runs them.
 
 ---
 
@@ -25,14 +26,15 @@ exclusion pass has to beat, not 0.500.
 ## The architecture
 
 <p align="center">
-  <img src="Images/agentic_rag_layered_architecture_simple.png" alt="Layered architecture" width="600">
+  <img src="Images/agent_layered_architecture.svg" alt="Layered architecture" width="720">
 </p>
 
-Who talks to whom. Purple is the orchestrator, green agents call a model, blue agents are plain
-code, dashed is off by default. The client and API layers are Phase 8.
+Who talks to whom. Purple is the orchestrator, green **agents** call an LLM, blue **tools** are
+plain code, white boxes are data and services, dashed is off by default. The client and API
+layers are Phase 8.
 
 <p align="center">
-  <img src="Images/agentic_rag_request_lifecycle_simple.png" alt="Request lifecycle" width="450">
+  <img src="Images/agent_request_lifecycle.svg" alt="Request lifecycle" width="560">
 </p>
 
 One question, top to bottom. The only branches are the retry and the web tier.
@@ -43,22 +45,25 @@ A tool-calling agent chooses its next action. The spec's central decision forbid
 *"if the model can decide to skip the exclusion check, it eventually will."* So this is a
 **workflow with one bounded retry**, not an autonomous agent — almost every edge is
 unconditional, and that is the design rather than a limitation of it. The Orchestrator in the
-diagrams is this graph, not a model: no agent chooses which agent runs next.
+diagrams is this graph, not a model: no model chooses which node runs next.
 
-### Agent map
+### Layer map
 
-| agent | graph node | code | tools | model |
-|---|---|---|---|---|
-| Orchestrator | the graph | `graph.py`, `run_agent` | — | none |
-| Agent state | — | `state.py`, `AgentState` | — | — |
-| Planner | `plan` | `decompose.py`, `decompose()` | — | `ministral-14b`, cached |
-| Retrieval | `gather` | `search_corpus` per sub-question + `tools.expand` | hybrid search, chunk files | none |
-| Exclusion | `exclusion_check` | `tools.exclusion_pass` | hybrid search | none |
-| Assembler | `assemble` | `search.fuse` + `within_budget` | — | none |
-| Answer | `synthesize` | `SYSTEM` + one rule, `_chain()` | — | Groq `gpt-oss-120b` |
-| Citation verifier | inside `synthesize` | `cited()`, records `cited_nothing` | — | none |
-| Final check | retry edge | deterministic trigger in `graph.py` | — | none |
-| Web supplement | `web_supplement` | `web.py` | web search API | none, flag-gated |
+**Agent** = calls an LLM. **Tool** = deterministic code, no model. **Graph** = the orchestrator.
+Two agents, six tools.
+
+| layer | type | graph node | code | calls | model |
+|---|---|---|---|---|---|
+| Orchestrator | Graph | the graph | `graph.py`, `run_agent` | — | none |
+| Agent state | State | — | `state.py`, `AgentState` | — | — |
+| Planner | **Agent** | `plan` | `decompose.py`, `decompose()` | — | `ministral-14b`, cached |
+| Retrieval | Tool | `gather` | `search_corpus` per sub-question + `tools.expand` | hybrid search, chunk files | none |
+| Exclusion | Tool | `exclusion_check` | `tools.exclusion_pass` | hybrid search | none |
+| Assembler | Tool | `assemble` | `search.fuse` + `within_budget` | — | none |
+| Answer | **Agent** | `synthesize` | `SYSTEM` + one rule, `_chain()` | — | Groq `gpt-oss-120b` |
+| Citation verifier | Tool | inside `synthesize` | `cited()`, records `cited_nothing` | — | none |
+| Final check | Tool | retry edge | deterministic trigger in `graph.py` | — | none |
+| Web supplement | Tool | `web_supplement` | `web.py` | web search API | none, flag-gated |
 
 ### Token budget
 
@@ -126,14 +131,15 @@ anything honest to be compared against.
 
 ---
 
-## The agents
+## The layers
 
-All code lives under `insurance_rag/agent/`.
+All code lives under `insurance_rag/agent/`. Each section opens with its **Type**: Agent (calls an
+LLM), Tool (plain code) or Graph.
 
 ### Orchestrator and agent state
 
 **Job:** run the graph above in order, enforce the step cap and the token budget.
-**Model:** none. **Files:** `graph.py`, `state.py`, `budget.py`.
+**Type:** Graph — no LLM. **Files:** `graph.py`, `state.py`, `budget.py`.
 
 ```python
 class AgentState(TypedDict):
@@ -160,7 +166,7 @@ class BudgetExceeded(RuntimeError): ...
 ### Planner agent
 
 **Job:** split the question into at most 3 sub-questions.
-**Model:** `mistral/ministral-14b-latest`, cached. **File:** `decompose.py`.
+**Type:** Agent. **Model:** `mistral/ministral-14b-latest`, cached. **File:** `decompose.py`.
 
 ```python
 DECOMPOSE_SYSTEM: str
@@ -177,11 +183,11 @@ The cap of 3 comes from the failing records: mean independent provisions per fai
 
 **Tested by:** the decompose checkpoint in [Free checkpoints](#free-checkpoints).
 
-### Retrieval agent
+### Retrieval tool
 
 **Job:** run `search_corpus` on the original question (channel `main`) and on each sub-question
 (channels `sub:0`, `sub:1`, …), then add ordinal neighbours (channel `neighbors`).
-**Model:** none. **File:** `tools.py`.
+**Type:** Tool — no LLM. **File:** `tools.py`.
 
 ```python
 @lru_cache(maxsize=1)
@@ -204,11 +210,11 @@ seed covers both.
 
 **Tested by:** the neighbours checkpoint in [Free checkpoints](#free-checkpoints).
 
-### Exclusion agent
+### Exclusion tool
 
 **Job:** find the clause that limits or cancels what the other passes found. It runs on every
 question — `exclusion_check` is on an **unconditional** edge.
-**Model:** none. **File:** `tools.py`.
+**Type:** Tool — no LLM. **File:** `tools.py`.
 
 ```python
 LIMITING_CUES: tuple[str, ...]
@@ -229,13 +235,13 @@ The number to beat is **0.731** exclusion recall — single-shot at k=20, not 0.
 ### Assembler
 
 **Job:** fuse every pool into one ranked context that fits the budget.
-**Model:** none.
+**Type:** Tool — no LLM.
 
 Pools are fused as one RRF union with named channels, as settled in
 [The metric](#the-metric--settled-before-building), item 1. The result is cut to
 `agent_context_tokens` (3000) through `within_budget`.
 
-**The exclusion agent's top 2 hits enter the context unconditionally**, regardless of fused
+**The exclusion tool's top 2 hits enter the context unconditionally**, regardless of fused
 rank. Without a reserved floor, RRF can outvote the mandatory check and the edge becomes
 decorative — the spec's own failure mode relocated from the prompt into the ranker.
 
@@ -245,7 +251,7 @@ decorative — the spec's own failure mode relocated from the prompt into the ra
 
 **Job:** write the answer from the assembled excerpts, citing a locator after every statement, or
 reply with exactly `REFUSAL`.
-**Model:** Groq `gpt-oss-120b` — the only Groq call in the graph.
+**Type:** Agent. **Model:** Groq `gpt-oss-120b` — the only Groq call in the graph.
 
 Reuses the `SYSTEM` prompt from `chain.py` plus one appended rule, and `with_retry` for rate
 limits. The appended rule's wording is not yet written.
@@ -255,7 +261,7 @@ limits. The appended rule's wording is not yet written.
 ### Citation verifier
 
 **Job:** find which excerpts the answer actually cites.
-**Model:** none.
+**Type:** Tool — no LLM.
 
 Reuses `cited()` from `chain.py`, which matches whole locators after NFKC normalisation, so
 `s. 1` never matches inside `s. 18` or `s. 1(2)`.
@@ -271,7 +277,7 @@ feeds the Final check.
 ### Final check
 
 **Job:** decide between answer, retry and refusal.
-**Model:** none — never a second LLM call.
+**Type:** Tool — no LLM, and never a second LLM call.
 
 The retry trigger is **deterministic**: refusal string present, zero cited locators, or the
 exclusion channel contributed nothing. At most one retry, back to the Assembler.
@@ -297,7 +303,7 @@ answers, which were never renderable as answers under the contract anyway.
 ### Web supplement
 
 **Job:** show public web results beneath a refusal. Off by default, and off in every eval run.
-**Model:** none. **File:** `web.py`.
+**Type:** Tool — no LLM. **File:** `web.py`.
 
 `enable_web_fallback` has sat in `config.py` since iteration 1 and **is read by nothing**.
 Deviation 7 commits to it: *"a web-search tier… It sits after refusal, never inside it, and is
@@ -410,7 +416,7 @@ decompose_model:         str = "mistral/ministral-14b-latest"
 
 | protects | test |
 |---|---|
-| Exclusion agent | `"exclusion" in checked` for all 62 records — this is what makes step 4 an edge rather than a claim |
+| Exclusion tool | `"exclusion" in checked` for all 62 records — this is what makes step 4 an edge rather than a claim |
 | Answer agent | refusal reachable and returning exactly `REFUSAL` with zero citations |
 | Final check | `retries <= 1`; an answer citing nothing after the retry returns exactly `REFUSAL` |
 | Orchestrator | `steps <= max_agent_steps`; `BudgetExceeded` raising before Groq's cap |
@@ -470,7 +476,7 @@ What changed to fit the measurements above:
 | updated | citation agent → Citation verifier | `cited()`, no LLM |
 | updated | web search agent → Web supplement | flag-gated, after refusal only, verbatim snippets |
 | updated | lead-agent aggregation → Assembler | RRF union, 3000-token budget, exclusion floor |
-| added | Planner, Exclusion agent, Answer agent, Final check | decomposition, the mandatory pass, the one Groq call, the deterministic retry |
+| added | Planner agent, Exclusion tool, Answer agent, Final check | decomposition, the mandatory pass, the one Groq call, the deterministic retry |
 
 **Not adopted:** a no-LLM scope gate that refuses out-of-scope questions before retrieval. It
 would have to be measured against the 16 unanswerable records, and shown not to refuse any
