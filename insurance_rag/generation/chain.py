@@ -52,11 +52,11 @@ class Answer:
     retrieved: list[Chunk]  # everything the model saw - recall and citation metrics read this
 
 
-def within_budget(chunks: list[Chunk]) -> list[Chunk]:
+def within_budget(chunks: list[Chunk], limit: int = MAX_CONTEXT_TOKENS) -> list[Chunk]:
     """Drop the lowest-ranked chunks once the budget is spent; never truncate one mid-provision."""
     kept, spent = [], 0
     for chunk in chunks:
-        if spent + chunk.token_count > MAX_CONTEXT_TOKENS:
+        if spent + chunk.token_count > limit:
             break
         kept.append(chunk)
         spent += chunk.token_count
