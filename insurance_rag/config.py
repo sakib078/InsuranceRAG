@@ -96,11 +96,15 @@ class Settings(BaseSettings):
     )
 
     # --- agent ---
-    max_agent_steps: int = 9  # the retry path runs 9 nodes
-    agent_neighbor_window: int = 2
+    max_agent_steps: int = 10  # retry, refuse and the web tier is the longest path
+    agent_neighbor_window: int = 0  # 0 switches neighbours off; they added nothing at 2
+    agent_decompose: bool = True  # false skips the Planner, for ablation rows
+    agent_max_sub_questions: int = 3
+    decompose_model: str = "gemini/models/gemini-3.1-flash-lite"
     agent_context_tokens: int = 3000  # half of the 6000-token single-shot context
     agent_token_budget: int = 185_000  # stop before Groq's 200k daily cap
     enable_web_fallback: bool = False  # must stay false for every eval run
+    searxng_url: str = ""  # e.g. http://localhost:8080; empty skips the SearXNG fallback
 
     # --- tracing ---
     trace_log_path: Path = DATA_DIR / "traces.jsonl"
