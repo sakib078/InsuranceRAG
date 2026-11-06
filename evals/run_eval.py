@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 
 from evals.evaluators import (
@@ -48,13 +50,17 @@ def retrieval_shape() -> str:
 
 # --- targets ----------------------------------------------------------------------------------
 
-def retrieval_target(question: str, k: int) -> dict:
-    """What the shipped pipeline retrieves, in rank order. No generation, so no API call."""
-    chunks = search_corpus(question, k=k)
+def _retrieved(chunks) -> dict:
     return {
         "retrieved_locators": [chunk.locator for chunk in chunks],
         "retrieved_text": [chunk.text for chunk in chunks],
+        "retrieved_tokens": sum(chunk.token_count for chunk in chunks),
     }
+
+
+def retrieval_target(question: str, k: int) -> dict:
+    """What the shipped pipeline retrieves, in rank order. No generation, so no API call."""
+    return _retrieved(search_corpus(question, k=k))
 
 
 def generation_target(question: str, k: int | None = None) -> dict:
@@ -93,13 +99,18 @@ def report(totals: dict[str, list[float]], k: int, misses: dict | None = None) -
     return summary
 
 
-def run_retrieval(records: list[dict], k: int, show_misses: bool) -> tuple[dict, dict]:
-    """Offline: query pgvector once per record and score the custom retrieval evaluators."""
+def run_retrieval(
+    records: list[dict], k: int, show_misses: bool, target=retrieval_target
+) -> tuple[dict, dict]:
+    """Offline: run `target` once per record and score the custom retrieval evaluators."""
     evaluators.DEPTH = k  # before the first score, so the metric keys carry the right depth
     totals: dict[str, list[float]] = defaultdict(list)
     misses: dict[str, list[str]] = defaultdict(list)
+    chunks, tokens = [], []
     for record in records:
-        outputs = retrieval_target(record["question"], k)
+        outputs = target(record["question"], k)
+        chunks.append(len(outputs["retrieved_locators"]))
+        tokens.append(outputs["retrieved_tokens"])
         for evaluator in RETRIEVAL_EVALUATORS:
             verdict = evaluator(outputs, labels_of(record))
             if verdict["score"] is None:  # off-slice: not scored, not averaged
@@ -107,7 +118,12 @@ def run_retrieval(records: list[dict], k: int, show_misses: bool) -> tuple[dict,
             totals[verdict["key"]].append(verdict["score"])
             if verdict["score"] == 0.0:
                 misses[verdict["key"]].append(record["id"])
-    return report(totals, k, dict(misses) if show_misses else None), dict(misses)
+    summary = report(totals, k, dict(misses) if show_misses else None)
+    summary["context_chunks"] = sum(chunks) / len(chunks)
+    summary["context_tokens"] = sum(tokens) / len(tokens)
+    print(f"\ncontext: {summary['context_chunks']:.1f} chunks, "
+          f"{summary['context_tokens']:.0f} tokens on average")
+    return summary, dict(misses)
 
 
 def _errored(row: dict) -> bool:
@@ -146,8 +162,10 @@ def _guard(errored: int, rows: int) -> None:
         )
 
 
-def run_generation(dataset: str, config: str, concurrency: int, pin_k: int | None) -> dict:
-    """Hosted: LangSmith runs the target over the dataset, then every wired evaluator."""
+def run_generation(
+    dataset: str, config: str, concurrency: int, target: Callable[[str], dict], metadata: dict
+) -> dict:
+    """Hosted: LangSmith runs `target` over the dataset, then every wired evaluator."""
     from langsmith import Client
 
     from evals.langsmith import BUILT_INS
@@ -156,12 +174,12 @@ def run_generation(dataset: str, config: str, concurrency: int, pin_k: int | Non
         raise SystemExit("set LANGSMITH_API_KEY in .env - get one at smith.langchain.com")
 
     results = Client(api_key=settings.langsmith_api_key).evaluate(
-        lambda inputs: generation_target(inputs["question"], pin_k),
+        lambda inputs: target(inputs["question"]),
         data=dataset,
         evaluators=[*BUILT_INS, *CUSTOM_EVALUATORS],
         experiment_prefix=config,
         max_concurrency=concurrency,  # free tiers rate-limit long before they refuse
-        metadata=describe(config, pin_k),
+        metadata=metadata,
     )
     totals, rows, errored = _tally(results)
     summary = report(totals, settings.rerank_top_k)
@@ -186,14 +204,14 @@ def describe(config: str, pin_k: int | None) -> dict:
     }
 
 
-def write(record: dict, config: str, suite: str) -> None:
+def write(record: dict, config: str, suite: str, directory: Path = RESULTS_DIR) -> None:
     """The per-config file is the row you cite; history is append-only evidence beside it."""
-    RESULTS_DIR.mkdir(exist_ok=True)
-    path = RESULTS_DIR / f"{config}_{suite}.json"
+    directory.mkdir(exist_ok=True)
+    path = directory / f"{config}_{suite}.json"
     path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 
     # Append only after a newline so a record is never glued onto an unterminated line.
-    history = RESULTS_DIR / HISTORY_FILE
+    history = directory / HISTORY_FILE
     unterminated = history.exists() and not history.read_text(encoding="utf-8").endswith("\n")
     with history.open("a", encoding="utf-8") as fh:
         fh.write(f"{'\n' if unterminated else ''}{json.dumps(record)}\n")
@@ -223,6 +241,7 @@ def main() -> None:
 
     # Choose the corpus before anything reads the per-process cached chunk dir and collection.
     settings.chunking = Chunking(args.chunking)
+    settings.enable_web_fallback = False  # a measured row never includes the web tier
     evaluators.COVERAGE = args.coverage
 
     records = load_records(GOLDEN_PATH)
@@ -242,8 +261,10 @@ def main() -> None:
         if args.chunking == "uniform":
             provenance["coverage_threshold"] = args.coverage
     else:
-        summary = run_generation(args.dataset, args.config, args.concurrency, args.pin_k)
-        provenance = describe(args.config, args.pin_k) | {"judges_served": judges_used()}
+        metadata = describe(args.config, args.pin_k)
+        target = partial(generation_target, k=args.pin_k)
+        summary = run_generation(args.dataset, args.config, args.concurrency, target, metadata)
+        provenance = metadata | {"judges_served": judges_used()}
 
     write(
         {

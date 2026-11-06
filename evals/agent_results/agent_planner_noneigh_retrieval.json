@@ -1,0 +1,52 @@
+{
+  "config": "agent_planner_noneigh",
+  "suite": "retrieval",
+  "at": "2026-11-06T20:48:32.039313+00:00",
+  "k": 25,
+  "encoder": "qwen3",
+  "chunking": "clause",
+  "retrieval": "dense 50 (w=1.0) + sparse 20 (w=0.7) -> RRF k=60 (no rerank - see artifacts/rerank.py)",
+  "target": "agent through assemble, 3000 tokens",
+  "records": 62,
+  "scores": {
+    "recall@25_single": 0.8333333333333334,
+    "recall@25_multi": 0.3181818181818182,
+    "exclusion_recall": 0.7307692307692307,
+    "context_chunks": 15.870967741935484,
+    "context_tokens": 2786.7419354838707
+  },
+  "misses": {
+    "recall@25_single": [
+      "g-001",
+      "g-004",
+      "g-005",
+      "g-062"
+    ],
+    "recall@25_multi": [
+      "g-020",
+      "g-023",
+      "g-024",
+      "g-025",
+      "g-026",
+      "g-027",
+      "g-028",
+      "g-029",
+      "g-030",
+      "g-031",
+      "g-032",
+      "g-034",
+      "g-035",
+      "g-036",
+      "g-038"
+    ],
+    "exclusion_recall": [
+      "g-029",
+      "g-030",
+      "g-031",
+      "g-035",
+      "g-036",
+      "g-038",
+      "g-062"
+    ]
+  }
+}
