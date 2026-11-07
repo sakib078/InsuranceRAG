@@ -6,12 +6,13 @@ import argparse
 import json
 from datetime import UTC, datetime
 
+from insurance_rag.agent.web import render_web_block
 from insurance_rag.config import settings
-from insurance_rag.generation.chain import Answer, answer
+from insurance_rag.generation.chain import answer
 from insurance_rag.generation.citations import licence_lines, manifest_index, render_citation
 
 
-def trace(result: Answer) -> None:
+def trace(result) -> None:
     """One JSON line per query - the eval harness reads this later, not the console."""
     path = settings.trace_log_path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -33,10 +34,21 @@ def main() -> None:
     parser.add_argument("question")
     parser.add_argument("-k", type=int, help="pin the window; default walks the retry ladder")
     parser.add_argument("--no-trace", action="store_true")
+    parser.add_argument("--agent", action="store_true", help="answer through the agent graph")
     args = parser.parse_args()
 
-    result = answer(args.question, k=args.k)
+    if args.agent:
+        from insurance_rag.agent.graph import run_agent
+
+        result = run_agent(args.question)
+        checked = ", ".join(result.checked)
+        print(f"checked: {checked} | steps {result.steps} | tokens {result.tokens}\n")
+    else:
+        result = answer(args.question, k=args.k)
     print(result.text)
+
+    if web := render_web_block(getattr(result, "web", [])):
+        print(f"\n{web}")
 
     if result.chunks:
         index = manifest_index()

@@ -34,6 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 agent = [
+    "ddgs>=9.16.1",
     "langgraph>=0.2.60",
 ]
 serve = [
@@ -59,6 +60,7 @@ packages = ["insurance_rag"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not slow'"
 markers = [
     "regression: golden-set retrieval regression test; fails CI if quality drops",
     "slow: requires model download",
