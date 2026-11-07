@@ -63,7 +63,8 @@ def main() -> None:
             cur.execute(f"DROP INDEX IF EXISTS {INDEX_NAME}")
             conn.commit()
         else:
-            raise SystemExit("no CREATE INDEX form produced a bm25 index:\n  " + "\n  ".join(errors))
+            detail = "\n  ".join(errors)
+            raise SystemExit(f"no CREATE INDEX form produced a bm25 index:\n  {detail}")
         print(f"index {INDEX_NAME} ok (bm25)")
 
         cur.execute("SELECT count(*) FROM langchain_pg_embedding")

@@ -43,7 +43,7 @@ def is_rate_limit(exc: Exception) -> bool:
 
 
 def is_exhausted(exc: Exception) -> bool:
-    """Out of budget on this provider: a daily cap, an unpaid quota, or a 429 that outlived retry."""
+    """Out of budget on this provider: a daily cap, an unpaid quota, or a 429 after retries."""
     text = str(exc)
     return is_daily_cap(exc) or "402" in text or "429" in text
 

@@ -88,24 +88,13 @@ The only conditional edges in the whole graph are the bounded retry and the web 
 
 ---
 
-## Kill-check first — 1 minute, 0 tokens
+## Kill-check (passed)
 
-`artifacts/decompose_probe.py`. For each of the 38 independent gold provisions in the 13 failing
-records, query `search_corpus` with **that provision's own heading and first sentence**, k=5,
-and check whether it comes back.
-
-```python
-def gold_provisions(record_ids: list[str]) -> list[tuple[str, Chunk]]
-def self_query(chunk: Chunk, *, chars: int = 200) -> str
-def probe(record_ids: list[str], *, k: int = 5) -> dict[str, bool]
-```
-
-This is the ceiling on *any* decomposition strategy — a sub-question is at best a paraphrase of
-the provision it is meant to find.
-
-**Kill criterion:** below ~0.75 self-retrieval, oracle decomposition caps multi-hop at roughly
-`p^2.5` ≈ 0.28 — *below what one query already achieves*. Record Phase 7 as
-measured-and-dropped beside Phases 5 and 6, and stop.
+Before building, a free check asked whether a provision's own heading and first sentence, used as a
+query, retrieves that provision at k=5 (a one-off probe over the 38 gold provisions of the 13 failing
+multi-hop records, since removed and kept in git history). That is the ceiling on any decomposition strategy. The kill line was
+0.68, where `p^2.5` equals the single-query ceiling. The result was **0.921 (35 of 38)**, so Phase 7
+went ahead.
 
 ---
 
@@ -117,8 +106,7 @@ chunks and cost nothing, and its `misses` list is exactly the 13 records. With t
 anything honest to be compared against.
 
 1. The agent returns its pools as **one RRF-fused union**, not a concatenation — reuse
-   `search.fuse()` with pools as named channels (`main`, `sub:0`, `sub:1`, `exclusion`,
-   `neighbors`). `Hit.channels` then records which pass found each chunk, which is the spec's
+   `search.fuse()` with pools as named channels (`main`, `sub:0`, `sub:1`, `exclusion`). `Hit.channels` then records which pass found each chunk, which is the spec's
    "state what was checked" for free.
 2. **Budget-matched score:** truncate the union to the ladder width before scoring, through the
    existing `evaluators.DEPTH` mechanism. *If the agent cannot beat the single-shot multi-hop
@@ -147,7 +135,7 @@ LLM), Tool (plain code) or Graph.
 class AgentState(TypedDict):
     question: str; sub_questions: list[str]; pools: dict[str, list[Chunk]]
     checked: list[str]; context: list[Chunk]; answer: str
-    retries: int; steps: int; tokens: int; web: list[WebResult]
+    retries: int; steps: int; tokens: int; web: list[WebResult]; web_summary: str
 
 @dataclass(frozen=True)
 class AgentAnswer:
@@ -155,14 +143,17 @@ class AgentAnswer:
     checked: list[str]; steps: int; tokens: int
     cited_nothing: bool          # feeds the Final check
     web: list[WebResult] = []    # rendered beneath a refusal, never in the prompt
+    web_summary: str = ""        # optional, shown above the web sources
 
-def run_agent(question: str, *, decompose_enabled: bool = True) -> AgentAnswer
+def run_agent(question: str) -> AgentAnswer
 class BudgetExceeded(RuntimeError): ...
 ```
 
-`max_agent_steps` (10) caps the run: retry, refuse and the web tier is the longest path. **Reuse, do not fork:** `format_context`, `within_budget`,
-`cited`, `REFUSAL`, `revoked_docs`, the `SYSTEM` prompt plus one appended rule, `with_retry`,
-`fuse`. **`chain.answer()` stays untouched** so every recorded row remains reproducible.
+`max_agent_steps` (10) caps the run: retry, refuse and the web tier is the longest path.
+`agent_token_budget` counts Groq tokens only; the Gemini planner and web-summary calls are outside it.
+**Reuse, do not fork:** `format_context`, `within_budget`, `cited`, `REFUSAL`, `revoked_docs`, the
+`SYSTEM` prompt unchanged, `with_retry`, `fuse`. **`chain.answer()` stays untouched** so every
+recorded row remains reproducible.
 
 **Tested by:** step cap, retry cap and budget tests in [Tests and eval safety](#tests-and-eval-safety).
 
@@ -173,7 +164,7 @@ class BudgetExceeded(RuntimeError): ...
 
 ```python
 DECOMPOSE_SYSTEM: str
-def decompose(question: str, *, cache: Path | None = None) -> list[str]   # <= 3
+def decompose(question: str, *, cache: Path = CACHE) -> list[str]   # <= 3
 def build_cache(questions: list[str], path: Path) -> int
 ```
 
@@ -184,34 +175,19 @@ once, **0 Groq**, free on every later run. The cache doubles as the inspection a
 The cap of 3 comes from the failing records: mean independent provisions per failing record is
 2.5.
 
-**Tested by:** the decompose checkpoint in [Free checkpoints](#free-checkpoints).
+**Tested by:** a graph test that sub-questions become pools, and the 22 multi-hop decompositions
+read by eye.
 
 ### Retrieval tool
 
 **Job:** run `search_corpus` on the original question (channel `main`) and on each sub-question
-(channels `sub:0`, `sub:1`, …), then add ordinal neighbours (channel `neighbors`).
-**Type:** Tool — no LLM. **File:** `tools.py`.
+(channels `sub:0`, `sub:1`, …).
+**Type:** Tool — no LLM. **File:** `graph.py` (the `gather` node).
 
-```python
-@lru_cache(maxsize=1)
-def ordinal_index() -> dict[str, list[Chunk]]          # from settings.chunks_dir, not the DB
-def fetch_neighbors(chunk_id: str, *, window: int = 1) -> list[Chunk]
-def expand(chunks: Sequence[Chunk], *, window: int = 1) -> list[Chunk]
-def list_documents() -> list[dict]                     # via corpus.manifest.load_manifest
-```
+Ordinal neighbours (the chunks just before and after each hit) were built and measured, then
+removed: they added nothing on single or multi-hop and cost two exclusion records.
 
-`chunk_id` is `f"{doc_id}:{ordinal:04d}"` and `Chunk.__post_init__` enforces it, so neighbour
-ids are computable. Chunks are read from disk exactly as `evaluators._corpus()` already does —
-no DB round trip, no embedding.
-
-**Ordinal adjacency is worth more than it looks.** Clustering the 38 needed provisions by
-in-document position shows a ±2 window removes **6 of them** from the set retrieval must
-independently hit, for zero tokens. `g-035`'s two gold clauses are ordinally adjacent — one
-seed covers both.
-
-`list_documents()` is injected as state, not model-callable.
-
-**Tested by:** the neighbours checkpoint in [Free checkpoints](#free-checkpoints).
+**Tested by:** the retrieval rows in [Results so far](#results-so-far).
 
 ### Exclusion tool
 
@@ -481,12 +457,14 @@ every eval is single-turn, so the per-request Agent state is all this phase need
 
 ```python
 agent_context_tokens:    int = 3000        # half of MAX_CONTEXT_TOKENS - budget-matched
-agent_neighbor_window:   int = 0           # 0 switches neighbours off; +-2 added nothing
 agent_decompose:         bool = True       # false skips the Planner, for ablation rows
 agent_max_sub_questions: int = 3           # mean independent provisions per failing record: 2.5
 agent_token_budget:      int = 185_000     # process-wide; fail before Groq's 200k, not after
 decompose_model:         str = "gemini/models/gemini-3.1-flash-lite"
 searxng_url:             str = ""          # empty skips the SearXNG fallback
+web_min_relevance:       float = 0.3       # share of the question's terms a web result must contain
+web_summary:             bool = False      # optional plain-language summary of the web passages
+web_summary_model:       str = "gemini/models/gemini-3.1-flash-lite"
 ```
 
 `max_agent_steps` (10) and `enable_web_fallback` (False) also live in `config.py`.
@@ -495,7 +473,8 @@ searxng_url:             str = ""          # empty skips the SearXNG fallback
 
 ## Tests and eval safety
 
-`tests/test_agent.py` and `tests/test_web.py`, synthesis mocked, 0 tokens.
+`tests/test_agent.py`, `tests/test_web.py` and `tests/test_web_summary.py`, synthesis mocked, 0 tokens.
+`tests/test_agent_integration.py` (marker `slow`) runs the retrieval nodes over the real corpus.
 
 | protects | test |
 |---|---|
@@ -512,55 +491,17 @@ Three guards, because the flag now gates graph behaviour.
 
 ---
 
-## Free checkpoints
-
-Four measurements along the way cost **zero tokens** and give post-hoc attribution if the final
-number disappoints — the mitigation for building the whole graph at once rather than in stages.
-Each writes its own `misses` list, so any two are diffable record-by-record.
-
-| after | tells you |
-|---|---|
-| Retrieval: neighbours | did ordinal expansion flip the records the adjacency table predicts? |
-| Exclusion: exclusion pass | beat 0.731 exclusion recall? each of the 3 channels ablates free |
-| Planner: decompose | 22 decompositions printed beside their gold — readable by eye in 5 minutes |
-| Planner: decomposition wired | `decomposition_gain` per record; negative means it destroyed information |
-
-`sub_question_yield` below ~0.5 means decomposition is producing three bad pools instead of one
-mediocre one.
-
----
-
 ## Spec 05 — faithful, adapted, dropped
 
 | item | verdict |
 |---|---|
 | Step 4 a graph edge, not a prompt instruction | **faithful** — unconditional edge, asserted by a test on the trace |
 | DECOMPOSE bounded; SYNTHESIZE citing every clause; one retry; step cap; refuse cleanly | **faithful** |
-| `fetch_neighbors` | **faithful, promoted** to a deterministic node — the adjacency measurement says it pays unconditionally, so making it a model decision is pure downside |
 | Step 4's `role_filter="exclusion"` / `"condition"` | **adapted** — only **8 of 33** gold exclusion locators carry `chunk_role=exclusion`; 11 are `coverage`, 8 `schedule`, 5 `other`. The predicate becomes probe query + cue promotion, with the role filter as one low-weight channel. The spec's *intent* — a separate unskippable pass whose only job is to find the limit — is preserved exactly; only the retrieval predicate changes |
 | Step 3's `role_filter="coverage"` | **adapted to unfiltered** — 29 of 88 gold are `coverage` and 31 are `other`, so filtering discards 67% of gold |
-| `list_documents()` | **adapted** — built, but injected as state rather than model-callable |
 | Step 2 `resolve_definition` | **dropped** — 1 of 88 gold locators (1.1%), the same number that killed Phase 6, and dense already surfaces definitions at rank 1–2 |
 
 ---
-
-## Changes from the first multi-agent draft
-
-The first draft had a lead agent routing between retrieval, citation and web-search agents.
-What changed to fit the measurements above:
-
-| change | item | why |
-|---|---|---|
-| removed | cross-encoder reranker | measured and rejected in Phase 5 |
-| removed | LLM query classification in the lead agent | a model that routes can route around the exclusion check; edges are fixed instead |
-| removed | relevance-threshold branch | no calibrated score exists once the cross-encoder is gone |
-| removed | "out of scope → web search" | out-of-scope questions take the refusal path; web renders beneath it |
-| updated | lead agent → Orchestrator | runs the fixed graph, no LLM |
-| updated | session memory → Agent state | per-request state; multi-turn memory is Phase 8 |
-| updated | citation agent → Citation verifier | `cited()`, no LLM |
-| updated | web search agent → Web supplement | flag-gated, after refusal only, verbatim snippets |
-| updated | lead-agent aggregation → Assembler | RRF union, 3000-token budget, exclusion floor |
-| added | Planner agent, Exclusion tool, Answer agent, Final check | decomposition, the mandatory pass, the one Groq call, the deterministic retry |
 
 **Not adopted:** a no-LLM scope gate that refuses out-of-scope questions before retrieval. It
 would have to be measured against the 16 unanswerable records, and shown not to refuse any
@@ -570,19 +511,15 @@ answerable one, before it earns a node.
 
 ## Verification
 
-1. **Regression proof first:** the pipeline target scored at the ladder width must reproduce the
-   recorded single-shot row exactly, on all three scores and all three `misses` lists. That
-   proves the new machinery changed no existing number.
-2. `python -m evals.validate_golden` → `all locators resolve`, 62 records.
-3. `pytest tests/test_agent.py tests/test_web.py` with synthesis mocked — 0 tokens.
-4. **Retrieval row before generation row.** The retrieval row is free and must match the
-   checkpoint numbers end-to-end; a mismatch means the graph wiring differs from what was
-   measured.
-5. A retrieval eval row must be byte-identical with `enable_web_fallback` on or off. If it is
-   not, guard 1 has failed.
-6. Only then the generation row, ~230–250k Groq tokens at `agent_context_tokens=3000` (see
-   [Token budget](#token-budget)): lower the context cap or split the run across two days.
-7. Diff `misses` against the single-shot control record by record. The 13 names are known.
+1. `python -m evals.validate_golden` reports `all locators resolve`, 62 records.
+2. `pytest tests` (fast, 0 tokens) and `pytest -m slow` (the 62-question exclusion test).
+3. A retrieval row with `python -m evals.run_agent_eval --suite retrieval --config <name>` is free;
+   compare it with `pool_k15` or `pool_k25` at the same chunk count.
+4. A retrieval row is identical with the web switch on or off, because both runners force it off.
+5. The generation row (`--suite generation`) costs about 230–250k Groq tokens at
+   `agent_context_tokens=3000`, so it needs a paid plan or a split run (see
+   [Token budget](#token-budget)).
+6. Diff `misses` against the single-shot control record by record. The 13 names are known.
 
 ## Results so far
 
@@ -591,8 +528,8 @@ controls stay in `evals/results/`. Retrieval rows, 0 tokens, at about 15 chunks 
 
 | row | chunks | single | multi | exclusion |
 |---|---|---|---|---|
-| agent, no planner | 15.0 | 0.792 | 0.273 | 0.692 |
-| agent + planner (`agent_v1`, neighbours off) | 15.9 | 0.833 | 0.318 | 0.731 |
+| agent, no planner (neighbours on, since removed) | 15.0 | 0.792 | 0.273 | 0.692 |
+| agent + planner (`agent_v1`) | 15.9 | 0.833 | 0.318 | 0.731 |
 | single-shot `pool_k15` | 15.0 | 0.833 | 0.318 | 0.654 |
 | single-shot `pool_k25` | 25.0 | 0.875 | 0.409 | 0.769 |
 
@@ -602,7 +539,7 @@ controls stay in `evals/results/`. Retrieval rows, 0 tokens, at about 15 chunks 
   3000-token cut loses nothing: the misses are retrieval misses. Deeper sub-question pools
   (10, 20) and a plain-words planner prompt did not help.
 - Ordinal neighbours (±2) added nothing on single or multi-hop and cost 2 exclusion records, so
-  `agent_neighbor_window` defaults to 0.
+  they were removed.
 - The generation row is not yet measured; see [Token budget](#token-budget).
 - The golden set changed after the first rows were recorded: `g-056` became multi-hop (22
   scored, was 21), so the old 0.143 / 0.381 are now 0.182 / 0.409.
@@ -610,6 +547,5 @@ controls stay in `evals/results/`. Retrieval rows, 0 tokens, at about 15 chunks 
 ## The honest risk
 
 One query with zero tokens already scores 0.409 multi-hop. The agent must beat that **at the
-same chunk count** to justify the phase. If the generation row disappoints, the free checkpoints
-and per-node traces attribute it without paying for separate runs — which is the mitigation for
-building the whole graph at once.
+same chunk count** to justify the phase. If the generation row disappoints, the free retrieval
+rows and per-node traces attribute it without paying for separate runs.

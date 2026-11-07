@@ -80,7 +80,6 @@ class Settings(BaseSettings):
     # --- evaluation: judge runs off a different provider; keys are unprefixed in .env ---
     gemini_eval_key: str | None = Field(default=None, validation_alias="GEMINI_API_EVAL_KEY")
     openrouter_key: str | None = Field(default=None, validation_alias="OPENROUTER_KEY")
-    mistral_api_key: str | None = Field(default=None, validation_alias="MISTRAL_API_KEY")
     nvidia_api_key: str | None = Field(default=None, validation_alias="NVIDIA_API_KEY")
     # pydantic-settings never fills os.environ, so the LangSmith client is handed this key.
     langsmith_api_key: str | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
@@ -97,7 +96,6 @@ class Settings(BaseSettings):
 
     # --- agent ---
     max_agent_steps: int = 10  # retry, refuse and the web tier is the longest path
-    agent_neighbor_window: int = 0  # 0 switches neighbours off; they added nothing at 2
     agent_decompose: bool = True  # false skips the Planner, for ablation rows
     agent_max_sub_questions: int = 3
     decompose_model: str = "gemini/models/gemini-3.1-flash-lite"

@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from functools import lru_cache
-
 from insurance_rag.config import settings
-from insurance_rag.corpus.manifest import Phase, load_manifest
 from insurance_rag.generation.chain import within_budget
 from insurance_rag.retrieval.search import Hit, fuse, search_corpus
-from insurance_rag.retrieval.store import read_chunks
 from insurance_rag.schema import Chunk, ChunkRole
 
 __all__ = [
-    "ordinal_index", "fetch_neighbors", "expand", "list_documents",
     "LIMITING_CUES", "WEIGHTS", "exclusion_probe", "cue_score", "exclusion_pass", "assemble",
 ]
 
@@ -21,45 +15,6 @@ LIMITING_CUES = ("shall not", "unless", "subject to", "does not apply", "except"
 
 #: Exclusion channel weights; a weight of 0 drops the channel, so each one ablates.
 WEIGHTS = {"probe": 1.0, "role": 0.4, "cues": 0.6}
-
-
-@lru_cache(maxsize=1)
-def ordinal_index() -> dict[str, list[Chunk]]:
-    """doc_id -> its chunks in ordinal order, so a list index is the ordinal."""
-    index: dict[str, list[Chunk]] = {}
-    for path in sorted(settings.chunks_dir.glob("*.jsonl")):
-        if not path.name.startswith("_"):
-            for chunk in read_chunks(path):
-                index.setdefault(chunk.doc_id, []).append(chunk)
-    return index
-
-
-def fetch_neighbors(chunk_id: str, *, window: int = settings.agent_neighbor_window) -> list[Chunk]:
-    """The chunks within `window` ordinals of this one in the same document, not itself."""
-    doc_id, ordinal = chunk_id.rsplit(":", 1)
-    centre = int(ordinal)
-    nearby = ordinal_index()[doc_id][max(centre - window, 0) : centre + window + 1]
-    return [c for c in nearby if c.ordinal != centre]
-
-
-def expand(chunks: Sequence[Chunk], *, window: int = settings.agent_neighbor_window) -> list[Chunk]:
-    """Neighbours of every chunk, de-duplicated, leaving out the chunks passed in."""
-    own = {c.chunk_id for c in chunks}
-    found: dict[str, Chunk] = {}
-    for chunk in chunks:
-        for neighbour in fetch_neighbors(chunk.chunk_id, window=window):
-            if neighbour.chunk_id not in own:
-                found.setdefault(neighbour.chunk_id, neighbour)
-    return list(found.values())
-
-
-def list_documents() -> list[dict]:
-    """One row per v1 document: id, title, citation and status."""
-    return [
-        {"doc_id": r.doc_id, "title": r.title, "citation": r.citation, "status": r.status.value}
-        for r in load_manifest()
-        if r.phase is Phase.V1
-    ]
 
 
 def exclusion_probe(question: str) -> str:

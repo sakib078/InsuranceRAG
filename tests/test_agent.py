@@ -10,11 +10,12 @@ from insurance_rag.agent.web import WebResult
 from insurance_rag.config import settings
 from insurance_rag.generation.chain import REFUSAL
 from insurance_rag.retrieval.search import Hit
+from insurance_rag.retrieval.store import read_chunks
 
 
 @pytest.fixture
 def chunks():
-    return tools.ordinal_index()["sabs-o-reg-34-10"][:6]
+    return read_chunks(settings.chunks_dir / "sabs-o-reg-34-10.jsonl")[:6]
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +85,30 @@ def test_web_results_follow_a_refusal_and_stay_out_of_the_prompt(monkeypatch):
     result = graph.run_agent("q")
     assert result.text == REFUSAL and result.web == [hit]
     assert all("SNIPPET" not in context for context in prompts)
+
+
+def test_the_summary_follows_the_web_results_and_stays_out_of_the_prompt(monkeypatch):
+    prompts = []
+    monkeypatch.setattr(
+        graph, "_generate", lambda context, question: (prompts.append(context) or REFUSAL, 100)
+    )
+    monkeypatch.setattr(settings, "enable_web_fallback", True)
+    monkeypatch.setattr(settings, "web_summary", True)
+    hit = WebResult("title", "https://example.com", "SNIPPET", "2026-11-07")
+    monkeypatch.setattr(web, "web_supplement", lambda question: [hit])
+    monkeypatch.setattr(graph, "summarize", lambda question, results: "Plain summary [1].")
+    result = graph.run_agent("q")
+    assert result.web == [hit] and result.web_summary == "Plain summary [1]."
+    assert all("Plain summary" not in context for context in prompts)
+
+
+def test_summary_flag_off_never_calls_the_summarizer(monkeypatch):
+    say(monkeypatch, REFUSAL)
+    monkeypatch.setattr(settings, "enable_web_fallback", True)
+    hit = WebResult("title", "https://example.com", "snippet", "2026-11-07")
+    monkeypatch.setattr(web, "web_supplement", lambda question: [hit])
+    monkeypatch.setattr(graph, "summarize", lambda q, r: pytest.fail("summarizer called"))
+    assert graph.run_agent("q").web_summary == ""
 
 
 def test_budget_stops_the_run(monkeypatch):

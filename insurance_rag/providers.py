@@ -28,12 +28,6 @@ PROVIDERS: dict[str, tuple[str, str, str]] = {
         "gemini_eval_key",
         "aistudio.google.com/apikey",
     ),
-    # Free tier covers the ministral sizes only.
-    "mistral": (
-        "https://api.mistral.ai/v1",
-        "mistral_api_key",
-        "console.mistral.ai - needs phone verification and a data-training opt-in",
-    ),
     # Lists far more models than a free account may call; slow, ~22s a call.
     "nvidia": (
         "https://integrate.api.nvidia.com/v1",
