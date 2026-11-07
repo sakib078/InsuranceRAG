@@ -79,18 +79,23 @@ graph has fixed edges, so this is one bounded pass, not a model-driven loop.
       claim that keeps the same numbers; advice-like wording ("you can shop around", "should") still passes
       and belongs to B4's banned-phrase rules.
 
-### A6. Graph shape
-- [ ] Web node = search, fetch, rank, (summarise); one bounded pass; still only after a refusal and only
-      when the web flag is on. Raise `max_agent_steps` only if the node count changes.
+### A6. Graph shape (done 2026-11-07)
+- [x] The web node is still one node after `refuse`: search, rank, fetch, then the optional summary, in one
+      bounded pass with no model-driven loop. Only runs after a refusal and only when the web flag is on.
+- [x] Node count unchanged, so `max_agent_steps` stays 10.
 
-### A7. Tests and checks
-- [ ] Unit tests: relevance threshold, domain ranking, passage extraction, summary labelling and the
-      faithfulness check.
-- [ ] Guards stay: web off in evals, web text never in the corpus prompt.
-- [ ] Live check on the five test questions; judge relevance, usefulness and plain language.
+### A7. Tests and checks (done 2026-11-07)
+- [x] Unit tests for the ad, language and social filters, URL cleanup, domain ranking, term-overlap
+      relevance, passage extraction, robots.txt, the summary check and rendering (49 tests pass).
+- [x] Guards stay: web off in evals; web text and the summary never enter the corpus prompt (graph test);
+      the summary flag off never calls the model (graph test).
+- [x] Live checks on the five test questions (web step, page passages and Gemini summary).
+- [ ] Still to judge by you: relevance, usefulness and plain language of the live output.
 
-### A8. Docs
-- [ ] Update `docs/agent_architecture.md` (web section, Deviation 7 note) and the layer diagrams.
+### A8. Docs (done 2026-11-07)
+- [x] `docs/agent_architecture.md` web section rewritten around a new diagram, `docs/Images/web_search_flow.svg`
+      (7 steps with NEW/CHANGED badges and tech chips), plus before/after, tech stack, settings, guarantees,
+      known limits and a try-it command; layer map row, test table and both layer diagrams updated.
 
 ---
 

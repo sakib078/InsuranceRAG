@@ -50,7 +50,7 @@ diagrams is this graph, not a model: no model chooses which node runs next.
 ### Layer map
 
 **Agent** = calls an LLM. **Tool** = deterministic code, no model. **Graph** = the orchestrator.
-Two agents, six tools.
+Two agents, six tools; the web tool can make one optional summary call.
 
 | layer | type | graph node | code | calls | model |
 |---|---|---|---|---|---|
@@ -63,7 +63,7 @@ Two agents, six tools.
 | Answer | **Agent** | `synthesize` | `SYSTEM` + one rule, `_chain()` | — | Groq `gpt-oss-120b` |
 | Citation verifier | Tool | inside `synthesize` | `cited()`, records `cited_nothing` | — | none |
 | Final check | Tool | retry edge | deterministic trigger in `graph.py` | — | none |
-| Web supplement | Tool | `web_supplement` | `web.py` | web search API | none, flag-gated |
+| Web supplement | Tool | `web_supplement` | `web.py`, `web_summary.py` | search backends, page fetch | none; optional Gemini summary, flag-gated |
 
 ### Token budget
 
@@ -305,17 +305,69 @@ answers, which were never renderable as answers under the contract anyway.
 
 ### Web supplement
 
-**Job:** show public web results beneath a refusal. Off by default, and off in every eval run.
-**Type:** Tool — no LLM. **File:** `web.py`.
+**Job:** show relevant public web passages, and optionally a plain-language summary, beneath a
+refusal. Off by default, and off in every eval run.
+**Type:** Tool, with one optional model call (Gemini, flag `web_summary`).
+**Files:** `web.py`, `web_summary.py`.
 
-`enable_web_fallback` has sat in `config.py` since iteration 1 and **is read by nothing**.
-Deviation 7 commits to it: *"a web-search tier… It sits after refusal, never inside it, and is
-disabled during every eval run."* The citation contract's third answer state fixes its
-rendering.
+**In plain words.** When the agent has to say "this corpus does not address that" and the web
+switch is on, it does one small, bounded web lookup so the reader still gets something useful. It
+finds Ontario auto-insurance pages, reads the most relevant ones, and shows the matching passages
+word for word, with an optional plain-language summary on top. Everything is boxed, numbered and
+labelled as unverified, and it never touches the answer, the citations or the evals.
 
-**The spec never mentions web search** — zero occurrences of web / internet / external / http
-across all 11 pages. This is entirely Deviation 7's invention, which is why it must stay outside
-the measured path.
+The spec never mentions web search (zero occurrences across all 11 pages). The tier is Deviation 7's
+invention, which is why it stays outside the measured path.
+
+<p align="center">
+  <img src="Images/web_search_flow.svg" alt="How the web supplement works" width="900">
+</p>
+
+#### Step by step
+
+1. **Search.** Two engines feed one list: `ddgs` (DuckDuckGo, asked for Canadian English)
+   and a local SearXNG. Each returns 10 results. "Ontario auto insurance" is added to the query when
+   the question lacks it.
+2. **Filter.** Drops ads, French pages (by word list and `/fr/` URLs), social and
+   user-generated sites such as Reddit, Facebook and Quora, and duplicate URLs.
+3. **Rank.** A result must contain at least 30% of the question's key words plus "Ontario".
+   Official sites and regulators (`ontario.ca`, `fsrao.ca`, `ibc.ca`) move up; insurer and broker
+   sales pages move down.
+4. **Read pages.** The top 3 pages are downloaded (`robots.txt` respected, generic
+   user-agent, 10 s and 1 MB limits). Menus and scripts are stripped, and up to 3 English paragraphs
+   per page that mention Ontario are kept word for word. An unreadable page keeps its search snippet.
+5. **Summarise** *(optional).* One Gemini call over those passages only. It must use plain
+   words, keep every number, date, condition and exception, add nothing, and end each sentence with
+   its source number such as `[1]`. Switch: `IRAG_WEB_SUMMARY`, off by default.
+6. **Check.** The summary is rejected if it contains a number the sources lack, a sentence
+   with no source marker, or a source number that does not exist.
+7. **Show.** A boxed block under the refusal: the summary (if kept) on top, then numbered
+   sources with their passages, URL and retrieval date, labelled unverified, not exclusion-checked
+   and not legal advice.
+
+The dashed line in the diagram is the shortcut taken when the summary is off or rejected: the
+passages are shown on their own.
+
+#### What changed
+
+| step | before (a stub, then a plain `ddgs` snippet list) | now |
+|---|---|---|
+| Search | `ddgs` only, 3 results, the raw question | `ddgs` and SearXNG merged, 10 each, "Ontario auto insurance" added when missing |
+| Filter | none; an ad link and French text reached the user | ads, French pages, social sites and duplicate URLs dropped |
+| Rank | whatever order the engine returned | term overlap with the question and "Ontario" at 0.3 or more, official sites nudged up, sales pages down |
+| Read pages | none, 2 to 3 line snippets only | top 3 pages fetched (robots.txt respected), best 3 Ontario paragraphs each, word for word |
+| Summary | ruled out: no model text over web content | optional Gemini summary, kept only if it passes a faithfulness check |
+| Show | title, snippet and URL | summary, then numbered sources with passages, URL, date and labels |
+
+#### Tech stack
+
+- LangGraph
+- DuckDuckGo search (`ddgs`)
+- SearXNG (self-hosted metasearch)
+- `httpx`
+- BeautifulSoup4 and `lxml`
+- Gemini 3.1 flash-lite
+- `pytest`
 
 #### What the contract already decides
 
@@ -355,40 +407,67 @@ No model call. Same deterministic pattern as the retry trigger.
 class WebResult:
     title: str
     url: str
-    snippet: str        # VERBATIM from the provider - never model-generated
+    snippet: str        # VERBATIM from the search engine
     retrieved_at: str   # ISO date, per the contract's "URL + retrieval date"
+    passages: tuple[str, ...] = ()   # VERBATIM paragraphs read from the page
 
-def web_supplement(question: str, *, k: int = 3) -> list[WebResult]   # ddgs, then SearXNG
+def web_supplement(question: str, *, k: int = 3) -> list[WebResult]   # search, rank, fetch
+def summarize(question: str, results: list[WebResult]) -> str          # web_summary.py, optional
 ```
 
-**Snippets render verbatim, never summarised.** A second LLM pass over web text is exactly where
-unverified prose starts sounding like cited law. Verbatim snippets are grounded by construction
-and cost zero tokens.
+#### If something fails
 
-**`WebResult` never enters the LLM context.** Render-time only — asserted by test.
+- `ddgs` fails or finds nothing: SearXNG's results are still used, and the other way round.
+- A page answers 403, or its `robots.txt` refuses: the search snippet is shown instead.
+- No result is relevant enough: no web block is shown at all.
+- The summary fails its check, or the model errors: only the word-for-word passages are shown.
 
-**Backend: `ddgs` first, SearXNG as the fallback.** `ddgs` (in the `agent` extra) needs no key;
-if it raises or finds nothing, a self-hosted SearXNG at `settings.searxng_url` is tried, and the
-fallback is skipped when that is empty. Any backend failure is logged and swallowed, so the web
-tier can never break the refusal it sits under. Swapping a provider changes only `web.py`.
+#### What it will never do
 
-#### Rendering — a mechanism that does not exist yet
+- **Answer in place of a refusal.** It runs only after a refusal and only with the switch on.
+- **Reach the answer's prompt or the citations.** The summary call sees only web passages and
+  `format_context` sees only corpus chunks, asserted by test.
+- **Pass off model text as law.** Passages are word for word. The summary is one controlled exception
+  to the first design's "verbatim only" rule (decided 2026-11-07): a separate call, restricted to the
+  fetched passages, checked for invented numbers and uncited sentences, shown above the sources and
+  labelled "unverified, not legal advice".
+- **Break the refusal.** A backend, page or model failure is logged and swallowed.
 
-`scripts/ask.py` discriminates purely on `if result.chunks:` — there is no third branch and no
-visual delimiter anywhere. `render_citation` / `licence_lines` are `Chunk`-typed and require a
-manifest row, so neither can accept a web result.
+#### Known limits
 
-Add a parallel renderer, not an overload:
+- Many sites answer 403 to automated fetches (`fsrao.ca`, `rates.ca` and others), so those fall back
+  to the search snippet.
+- Term overlap misses synonyms ("raise" against "affect"); it replaced encoder scoring for speed.
+- Passages are sometimes introductory text rather than the answer; the summary helps with that.
+- The summary check cannot catch a reworded claim that keeps the same numbers. Gemini latency varies
+  from 1 s to over 50 s on the free tier.
+- The language check is a word-list heuristic, not a language detector, and there is no JavaScript
+  rendering.
+- Advice-like wording copied from sources ("you can shop around") still passes; the banned-phrase
+  rules in the guardrails work will handle it.
+
+#### Try it
+
+```powershell
+$env:IRAG_ENABLE_WEB_FALLBACK="true"; $env:IRAG_WEB_SUMMARY="true"
+.venv\Scripts\python.exe -u -m scripts.ask --agent --no-trace "Is auto insurance mandatory in Ontario?"
+```
+
+#### Rendering
+
+`render_citation` and `licence_lines` are `Chunk`-typed and need a manifest row, so neither can
+take a web result. A parallel renderer sits beside them, and `scripts/ask.py` prints its block
+under the refusal:
 
 ```python
-def render_web_block(results: list[WebResult]) -> str
+def render_web_block(results: list[WebResult], summary: str = "") -> str
 ```
 
-Contract requirements: visually distinct, URL + retrieval date, **no clause locator**, marked
-unverified and **not exclusion-checked**. It renders *beneath* the refusal text, never instead
-of it.
+The block is visually distinct, numbered, shows each URL with its retrieval date, carries **no
+clause locator**, and is marked unverified and **not exclusion-checked**. It renders *beneath* the
+refusal text, never instead of it.
 
-**Tested by:** the three eval-safety guards.
+**Tested by:** the three eval-safety guards, `tests/test_web.py` and `tests/test_web_summary.py`.
 
 ### Backend API and session memory
 
@@ -427,6 +506,7 @@ searxng_url:             str = ""          # empty skips the SearXNG fallback
 | Web supplement, guard 1 | `run_eval` sets `settings.enable_web_fallback = False` before anything loads — the same prior art as `settings.chunking` and `evaluators.DEPTH` |
 | Web supplement, guard 2 | the graph reaches `END` from `refuse` without touching `web_supplement` when the flag is off |
 | Web supplement, guard 3 | no `WebResult` ever reaches `format_context` |
+| Web summary | a number the sources lack, an uncited sentence or a model failure drops the summary and shows only the passages; the summary flag off never calls the model |
 
 Three guards, because the flag now gates graph behaviour.
 
