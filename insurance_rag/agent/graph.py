@@ -8,6 +8,7 @@ from insurance_rag.agent import tools, web
 from insurance_rag.agent.budget import spend
 from insurance_rag.agent.decompose import decompose
 from insurance_rag.agent.state import AgentAnswer, AgentState
+from insurance_rag.agent.web_summary import summarize
 from insurance_rag.config import settings
 from insurance_rag.generation.chain import (
     MAX_CONTEXT_TOKENS,
@@ -97,8 +98,10 @@ def refuse(state: AgentState) -> dict:
 
 
 def web_supplement(state: AgentState) -> dict:
-    """Public web results to show beneath the refusal; they never reach the model."""
-    return _step(state, web=web.web_supplement(state["question"]))
+    """Public web results, and optionally a plain summary, shown beneath the refusal only."""
+    results = web.web_supplement(state["question"])
+    summary = summarize(state["question"], results) if settings.web_summary else ""
+    return _step(state, web=results, web_summary=summary)
 
 
 def after_refuse(state: AgentState) -> str:
@@ -144,7 +147,8 @@ def _graph(retrieval_only: bool = False):
 def _run(question: str, *, retrieval_only: bool = False) -> AgentState:
     start: AgentState = {
         "question": question, "sub_questions": [], "pools": {}, "checked": [],
-        "context": [], "answer": "", "retries": 0, "steps": 0, "tokens": 0, "web": [],
+        "context": [], "answer": "", "retries": 0, "steps": 0, "tokens": 0,
+        "web": [], "web_summary": "",
     }
     limit = settings.max_agent_steps + 1  # LangGraph counts the start as a step
     return _graph(retrieval_only).invoke(start, {"recursion_limit": limit})
@@ -170,4 +174,5 @@ def run_agent(question: str) -> AgentAnswer:
         tokens=final["tokens"],
         cited_nothing=text != REFUSAL and not used,
         web=final["web"],
+        web_summary=final["web_summary"],
     )
