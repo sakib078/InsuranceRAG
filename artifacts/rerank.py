@@ -107,7 +107,6 @@ def _device_dtype():
 @lru_cache(maxsize=1)
 def _model():
     """Tokenizer and model for whichever arm is configured. Loaded once per process."""
-    import torch
     from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer
 
     spec = reranker_spec()

@@ -10,15 +10,14 @@ from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 
+from evals import evaluators
 from evals.evaluators import (
     citation_accuracy_eval,
     exclusion_recall_eval,
     recall_multi,
     recall_single,
 )
-
 from evals.validate_golden import GOLDEN_PATH, load_records
-from evals import evaluators
 from insurance_rag.config import Chunking, settings
 from insurance_rag.providers import judges_used
 from insurance_rag.retrieval.search import search_corpus
@@ -214,7 +213,8 @@ def write(record: dict, config: str, suite: str, directory: Path = RESULTS_DIR) 
     history = directory / HISTORY_FILE
     unterminated = history.exists() and not history.read_text(encoding="utf-8").endswith("\n")
     with history.open("a", encoding="utf-8") as fh:
-        fh.write(f"{'\n' if unterminated else ''}{json.dumps(record)}\n")
+        lead = "\n" if unterminated else ""
+        fh.write(f"{lead}{json.dumps(record)}\n")
 
     print(f"\nwrote {path.parent.name}/{path.name}  (+ appended to {HISTORY_FILE})")
 

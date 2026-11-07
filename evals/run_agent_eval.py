@@ -19,8 +19,8 @@ def describe() -> dict:
     return {
         "encoder": str(settings.encoder),
         "agent": (
-            f"graph, planner {settings.decompose_model}, context {settings.agent_context_tokens} "
-            f"tokens, neighbour window {settings.agent_neighbor_window}"
+            f"graph, planner {settings.decompose_model}, "
+            f"context {settings.agent_context_tokens} tokens"
         ),
     }
 

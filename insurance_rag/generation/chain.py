@@ -119,7 +119,7 @@ def answer(question: str, *, k: int | None = None) -> Answer:
         if not retrieved:
             break
         payload = {"context": format_context(retrieved), "question": question}
-        text = with_retry(lambda: _chain().invoke(payload)).strip()
+        text = with_retry(lambda payload=payload: _chain().invoke(payload)).strip()
         if REFUSAL not in text:
             # A cited-nothing answer is a prompt failure, not a reason to drop the provenance.
             return Answer(question, text, cited(text, retrieved) or retrieved, retrieved)

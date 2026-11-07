@@ -119,7 +119,8 @@ def main() -> None:
 
     common = {"role_filter": args.role, "doc_filter": args.doc, "k": args.k}
     if args.stage == "fused":
-        rows = [(h.chunk, h.score, "+".join(h.channels)) for h in search_hybrid(args.query, **common)]
+        hits = search_hybrid(args.query, **common)
+        rows = [(h.chunk, h.score, "+".join(h.channels)) for h in hits]
     elif args.stage == "dense":
         rows = [(c, s, "dense") for c, s in search_with_scores(args.query, **common)]
     else:

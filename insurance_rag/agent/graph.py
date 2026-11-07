@@ -25,11 +25,6 @@ from insurance_rag.schema import Chunk
 
 __all__ = ["run_agent", "retrieve"]
 
-EXTRA_RULE = (
-    "\n7. Some excerpts are neighbouring provisions added for context; "
-    "rely on them only if they bear on the question."
-)
-
 
 def _step(state: AgentState, **update) -> dict:
     """The node's update plus one more step on the counter."""
@@ -40,7 +35,7 @@ def _step(state: AgentState, **update) -> dict:
 def _chain():
     from langchain_core.prompts import ChatPromptTemplate
 
-    system = SYSTEM.replace("{refusal}", REFUSAL) + EXTRA_RULE
+    system = SYSTEM.replace("{refusal}", REFUSAL)
     model = chat_model(settings.generation_provider, settings.generation_model, max_tokens=1024)
     return ChatPromptTemplate.from_messages([("system", system), ("human", USER)]) | model
 
@@ -58,13 +53,11 @@ def plan(state: AgentState) -> dict:
 
 
 def gather(state: AgentState) -> dict:
-    """Search the question and each sub-question, then add the neighbours of every hit."""
+    """Search the question and each sub-question."""
     k = settings.rerank_top_k
     pools = {"main": search_corpus(state["question"], k=k)}
     for i, sub in enumerate(state["sub_questions"]):
         pools[f"sub:{i}"] = search_corpus(sub, k=k)
-    seeds = [chunk for pool in pools.values() for chunk in pool]
-    pools["neighbors"] = tools.expand(seeds)
     return _step(state, pools=pools, checked=list(pools))
 
 

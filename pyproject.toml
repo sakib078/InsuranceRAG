@@ -1,7 +1,7 @@
 [project]
 name = "insurance-rag"
 version = "0.1.0"
-description = "Ontario auto insurance document RAG - hybrid retrieval, reranked, evaluated"
+description = "Ontario auto insurance document RAG - hybrid retrieval (dense + BM25), a planning agent, evaluated"
 requires-python = ">=3.11"
 
 dependencies = [
@@ -16,12 +16,12 @@ dependencies = [
     "httpx>=0.27",                  # e-Laws fetch in scripts/fetch_corpus.py
     # chunking - the reference tokenizer (Deviation 5), loaded directly
     "transformers>=4.51",
-    # retrieval - two bi-encoders under test, each with its family reranker
+    # retrieval - two bi-encoders under test
     "langchain-huggingface>=0.1",
     "sentence-transformers>=3.3",
     "torch>=2.6",
     "numpy>=1.26",                  # reads the precomputed .npz in scripts/index.py
-    # storage - one Postgres: pgvector for dense, tsvector/GIN for sparse
+    # storage - one Postgres: pgvector for dense, ParadeDB BM25 for sparse
     "langchain-postgres>=0.0.13",
     "psycopg[binary]>=3.2",
     "pgvector>=0.3.6",
@@ -69,6 +69,10 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"evals/langsmith/*.py" = ["E501"]  # judge prompts are long text
