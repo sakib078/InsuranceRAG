@@ -47,8 +47,9 @@ def main() -> None:
         result = answer(args.question, k=args.k)
     print(result.text)
 
-    if web := render_web_block(getattr(result, "web", [])):
-        print(f"\n{web}")
+    web_block = render_web_block(getattr(result, "web", []), getattr(result, "web_summary", ""))
+    if web_block:
+        print(f"\n{web_block}")
 
     if result.chunks:
         index = manifest_index()

@@ -28,6 +28,8 @@ graph has fixed edges, so this is one bounded pass, not a model-driven loop.
 - [x] ddgs "No results found." is an empty result, not a logged failure.
 - [x] English only: backends asked for English (`ddgs` region `ca-en`, SearXNG `language=en`); French
       titles, text and `/fr/` URLs dropped; a bilingual snippet keeps only its English half.
+- [x] Social and user-generated sites blocked (reddit, facebook, quora, youtube, x, instagram, tiktok,
+      pinterest, linkedin); a Reddit post had ended up as a source in a summary.
 - [x] 8 new tests in `tests/test_web.py` (19 pass).
 - [ ] Known gap: the language check is a word-list heuristic, not a language detector; revisit in A3.
 
@@ -62,14 +64,20 @@ graph has fixed edges, so this is one bounded pass, not a model-driven loop.
       others), so those fall back to snippets; passages are sometimes intro text rather than the answer
       (A5 summary will help); no JavaScript rendering.
 
-### A5. Plain-language summary (flag `IRAG_WEB_SUMMARY`, off by default)
-- [ ] One cloud LLM call over the extracted passages only.
-- [ ] **Preserve meaning:** same facts, numbers, dates and conditions ("unless", "subject to", exceptions);
-      no new facts; say so when the sources disagree or are silent.
-- [ ] A deterministic faithfulness check: every number, date and quoted term in the summary must appear in
-      the passages, or the summary is dropped and the verbatim passages are shown instead.
-- [ ] Every sentence tied to a source URL; labelled "Web summary: unverified, not legal advice".
-- [ ] Never enters the corpus answer, the citations or the eval path.
+### A5. Plain-language summary (done 2026-11-07; flag `IRAG_WEB_SUMMARY`, off by default)
+- [x] One call to Gemini (`web_summary_model`, so no Groq tokens) over the extracted passages only,
+      numbered `<source>` blocks, sources declared untrusted in the prompt.
+- [x] Prompt keeps the meaning: every number, date, amount, condition ("unless", "only if") and exception;
+      no new facts; says so if the sources disagree or do not answer; short sentences, everyday words.
+- [x] Deterministic faithfulness check: every number and amount must appear in the sources, every sentence
+      must cite a real source (`[1]` or `[2, 3]`), at most 1200 characters; otherwise the summary is dropped
+      and only the verbatim passages are shown. A model failure also falls back to the passages.
+- [x] Shown above the numbered sources, labelled "Plain-language summary (unverified, not legal advice)".
+      Never enters the corpus answer, the citations or the eval path.
+- [x] 13 new tests in `tests/test_web_summary.py`.
+- [ ] Known gaps: latency varies from 1 s to 50+ s (Gemini free tier); the check cannot catch a reworded
+      claim that keeps the same numbers; advice-like wording ("you can shop around", "should") still passes
+      and belongs to B4's banned-phrase rules.
 
 ### A6. Graph shape
 - [ ] Web node = search, fetch, rank, (summarise); one bounded pass; still only after a refusal and only

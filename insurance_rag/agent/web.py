@@ -38,6 +38,12 @@ def _today() -> str:
 #: Sponsored-link redirects some backends mix into organic results.
 AD_MARKERS = ("bing.com/aclick", "duckduckgo.com/y.js", "googleadservices.com", "/aclk?")
 
+#: User-generated and social sites are not sources for a legal-information product.
+BLOCKED_DOMAINS = (
+    "reddit.com", "facebook.com", "quora.com", "youtube.com", "youtu.be", "x.com", "twitter.com",
+    "instagram.com", "tiktok.com", "pinterest.com", "linkedin.com",
+)
+
 #: URL fragments of French-language pages; the corpus and the product are English only.
 FRENCH_URL_MARKERS = ("/fr/", "/fr-ca/", "//fr.")
 
@@ -60,11 +66,16 @@ def _is_english(text: str) -> bool:
     return french <= english
 
 
+def _blocked(url: str) -> bool:
+    host = urlparse(url).netloc.lower()
+    return any(host == d or host.endswith("." + d) for d in BLOCKED_DOMAINS)
+
+
 def _usable(results: list[WebResult]) -> list[WebResult]:
     """Organic, English-only results; a bilingual snippet keeps only its English parts."""
     kept = []
     for result in results:
-        if any(marker in result.url for marker in AD_MARKERS + FRENCH_URL_MARKERS):
+        if _blocked(result.url) or any(m in result.url for m in AD_MARKERS + FRENCH_URL_MARKERS):
             continue
         parts = [p.strip() for p in result.snippet.split("|") if p.strip()]
         english = [p for p in parts if _is_english(p)]
@@ -272,14 +283,16 @@ def web_supplement(question: str, *, k: int = 3) -> list[WebResult]:
     return [_with_passages(question, result) for result in results[:k]]
 
 
-def render_web_block(results: list[WebResult]) -> str:
+def render_web_block(results: list[WebResult], summary: str = "") -> str:
     """The results as an unmistakably separate block: unverified and not exclusion-checked."""
     if not results:
         return ""
     rule = "-" * 64
     lines = [rule, "WEB RESULTS: not part of the corpus, unverified, not exclusion-checked", rule]
-    for result in results:
-        lines.append(result.title)
+    if summary:
+        lines += ["Plain-language summary (unverified, not legal advice):", summary, ""]
+    for number, result in enumerate(results, start=1):
+        lines.append(f"[{number}] {result.title}")
         lines += [f"  {text}" for text in result.passages or (result.snippet,)]
         lines.append(f"  {result.url} (retrieved {result.retrieved_at})")
     return "\n".join(lines)

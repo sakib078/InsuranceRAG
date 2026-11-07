@@ -25,6 +25,7 @@ class AgentState(TypedDict):
     steps: int
     tokens: int
     web: list[WebResult]
+    web_summary: str
 
 
 @dataclass(frozen=True)
@@ -40,3 +41,4 @@ class AgentAnswer:
     tokens: int
     cited_nothing: bool
     web: list[WebResult] = field(default_factory=list)
+    web_summary: str = ""

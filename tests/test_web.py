@@ -225,6 +225,17 @@ def test_french_results_are_dropped():
     assert web._usable([french_title, french_text, french_url]) == []
 
 
+def test_social_and_user_generated_sites_are_blocked():
+    text = "Auto insurance in Ontario."
+    posts = [
+        WebResult("Thread", "https://www.reddit.com/r/ontario/x", text, "d"),
+        WebResult("Post", "https://m.facebook.com/p/1", text, "d"),
+        WebResult("Answer", "https://www.quora.com/q", text, "d"),
+    ]
+    assert web._usable(posts) == []
+    assert web._usable([WebResult("Auto", "https://notreddit.com/x", "Auto insurance.", "d")])
+
+
 def test_plain_english_results_pass_untouched():
     english = WebResult("Auto Insurance Ontario", "https://a.ca/z", "Home | Auto | Life", "d")
     assert web._usable([english]) == [english]

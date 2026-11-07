@@ -106,6 +106,8 @@ class Settings(BaseSettings):
     enable_web_fallback: bool = False  # must stay false for every eval run
     searxng_url: str = ""  # e.g. http://localhost:8080; empty skips the SearXNG fallback
     web_min_relevance: float = 0.3  # share of the question's terms a web result must contain
+    web_summary: bool = False  # a plain-language model summary above the web passages
+    web_summary_model: str = "gemini/models/gemini-3.1-flash-lite"  # Gemini: no Groq budget used
 
     # --- tracing ---
     trace_log_path: Path = DATA_DIR / "traces.jsonl"
