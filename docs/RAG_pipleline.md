@@ -285,6 +285,7 @@ which is the same finding as `"s. 31"` from Phase 2, arriving by a different rou
   reusing knobs that already exist rather than adding a new one. `answer()` walks it and stops
   at the first non-refusal, so a refusal is only believed once all three widths have refused.
   Cost: a genuinely off-corpus question now spends three model calls instead of one.
+  Later changed: the k=50 rung returned HTTP 413 on the free tier, so the ladder is now `(5, 25)`.
 - **Cited sources only.** `cited(text, chunks)` keeps the chunks whose locator appears verbatim
   in the answer. Rule 2 makes that a substring match, and it handles the model's combined
   `[A; B]` form for free. Before this, a k=20 run printed twenty citation blocks under a
@@ -381,9 +382,9 @@ would undo the point of the harness.
 chunks = search_corpus(question, k=width)
 ```
 
-`search_corpus` embeds the question with Qwen3's *query* prompt, runs a cosine search in
-pgvector, and hands back `Chunk` objects — not `Document`s. One type flows through generation
-and, later, the agent.
+`search_corpus` embeds the question with Qwen3's *query* prompt, runs a dense search in pgvector
+and a BM25 search, fuses the two by reciprocal rank, and hands back `Chunk` objects — not
+`Document`s. One type flows through generation and the agent.
 
 **2. Augment** — `format_context()`
 
@@ -421,7 +422,7 @@ An LCEL pipe. `temperature=0`, so the answer is reproducible.
 **5. Retry, or refuse for real** — the `LADDER` loop
 
 If the answer comes back as the refusal, the same question runs again at a wider `k` — 5, then
-20, then 50. Only after all three does the refusal stand. Passing `-k` pins one width and skips
+25. Only after both does the refusal stand. Passing `-k` pins one width and skips
 the ladder entirely, which is what you want when measuring.
 
 **6. Return** — `Answer`
