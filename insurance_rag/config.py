@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     agent_token_budget: int = 185_000  # stop before Groq's 200k daily cap
     enable_web_fallback: bool = False  # must stay false for every eval run
     searxng_url: str = ""  # e.g. http://localhost:8080; empty skips the SearXNG fallback
+    web_min_relevance: float = 0.3  # share of the question's terms a web result must contain
 
     # --- tracing ---
     trace_log_path: Path = DATA_DIR / "traces.jsonl"
