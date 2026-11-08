@@ -130,6 +130,14 @@ def test_a_backend_with_nothing_relevant_falls_through(monkeypatch):
     assert web.web_supplement("Is auto insurance mandatory in Ontario?") == [relevant]
 
 
+def test_insurer_and_broker_sales_pages_are_dropped(monkeypatch):
+    sales = WebResult("Mandatory auto insurance in Ontario", "https://www.intact.ca/x", "s", "d")
+    info = WebResult("Mandatory auto insurance in Ontario", "https://www.fsrao.ca/x", "s", "d")
+    monkeypatch.setattr(web, "_ddgs", lambda question, k: [sales, info])
+    monkeypatch.setattr(web, "_searxng", lambda question, k: [])
+    assert web.web_supplement("Is auto insurance mandatory in Ontario?") == [info]
+
+
 def test_overlap_counts_the_questions_terms_in_the_text():
     question = "Is auto insurance mandatory in Ontario?"
     assert web._overlap(question, "Mandatory auto insurance in Ontario") == 1.0

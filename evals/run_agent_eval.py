@@ -20,7 +20,8 @@ def describe() -> dict:
         "encoder": str(settings.encoder),
         "agent": (
             f"graph, planner {settings.decompose_model}, "
-            f"context {settings.agent_context_tokens} tokens"
+            f"context {settings.agent_context_tokens} tokens, "
+            f"guardrails {'on' if settings.enable_guardrails else 'off'}"
         ),
     }
 
@@ -53,12 +54,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", default=settings.langsmith_dataset)
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--misses", action="store_true", help="list the records that scored 0")
+    parser.add_argument("--guards", action="store_true",
+                        help="generation: run with the policy layer and plain-language prompt on")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     settings.enable_web_fallback = False  # a measured row never includes the web tier
+    settings.enable_guardrails = args.guards  # off by default: rows stay comparable
     records = load_records(GOLDEN_PATH)
     print(f"{args.config} [agent {args.suite}]: {len(records)} records")
 

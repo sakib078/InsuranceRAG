@@ -1,10 +1,10 @@
-"""The fixed agent graph: every edge is unconditional except the final check."""
+"""The fixed agent graph: guard, plan, gather, assemble, answer, final check, guard."""
 
 from __future__ import annotations
 
 from functools import lru_cache
 
-from insurance_rag.agent import tools, web
+from insurance_rag.agent import policy, tools, web
 from insurance_rag.agent.budget import spend
 from insurance_rag.agent.decompose import decompose
 from insurance_rag.agent.state import AgentAnswer, AgentState
@@ -25,25 +25,51 @@ from insurance_rag.schema import Chunk
 
 __all__ = ["run_agent", "retrieve"]
 
+GUARD_NODES = 2  # guard_input and guard_output sit outside the agent's step cap
+
 
 def _step(state: AgentState, **update) -> dict:
     """The node's update plus one more step on the counter."""
     return {**update, "steps": state["steps"] + 1}
 
 
-@lru_cache(maxsize=1)
-def _chain():
+STYLE = """
+7. Write for a reader with no legal training, in everyday words. Open with a one-sentence answer.
+   Add at most two short sentences for a condition or exception that changes the answer. Add
+   nothing the question did not ask. Explain a defined term only if the answer uses it. Keep
+   every citation."""
+
+
+@lru_cache(maxsize=2)
+def _chain(plain: bool):
     from langchain_core.prompts import ChatPromptTemplate
 
-    system = SYSTEM.replace("{refusal}", REFUSAL)
+    system = (SYSTEM + (STYLE if plain else "")).replace("{refusal}", REFUSAL)
     model = chat_model(settings.generation_provider, settings.generation_model, max_tokens=1024)
     return ChatPromptTemplate.from_messages([("system", system), ("human", USER)]) | model
 
 
 def _generate(context: str, question: str) -> tuple[str, int]:
-    """The one Groq call: the answer text and the tokens it cost."""
-    message = with_retry(lambda: _chain().invoke({"context": context, "question": question}))
+    """The one Groq call; the plain-language rule rides with the guardrails (eval rows omit it)."""
+    chain = _chain(settings.enable_guardrails)
+    message = with_retry(lambda: chain.invoke({"context": context, "question": question}))
     return message.content.strip(), (message.usage_metadata or {}).get("total_tokens", 0)
+
+
+def guard_input(state: AgentState) -> dict:
+    """Redact personal data and stop questions the product must not answer; no model call."""
+    if not settings.enable_guardrails:
+        return {}
+    intake = policy.check_input(state["question"])
+    update: dict = {"question": intake.question, "guard": intake.notes}
+    if intake.blocked:
+        update |= {"answer": intake.answer, "blocked": intake.blocked}
+    return update
+
+
+def after_guard_input(state: AgentState) -> str:
+    """A stopped question skips the agent and goes straight to the output guard."""
+    return "guard_output" if state["blocked"] else "plan"
 
 
 def plan(state: AgentState) -> dict:
@@ -97,6 +123,21 @@ def web_supplement(state: AgentState) -> dict:
     return _step(state, web=results, web_summary=summary)
 
 
+def guard_output(state: AgentState) -> dict:
+    """Screen the answer and summary and attach the disclaimer; a flagged answer is replaced."""
+    if not settings.enable_guardrails:
+        return {}
+    excerpts = " ".join(chunk.text for chunk in state["context"])
+    retried = ["retried"] if state["retries"] and state["answer"] != REFUSAL else []
+    release = policy.check_output(
+        state["answer"], state["web_summary"], excerpts, state["blocked"], state["guard"] + retried
+    )
+    return {
+        "answer": release.answer, "web_summary": release.summary, "blocked": release.blocked,
+        "guard": release.notes, "disclaimer": release.disclaimer,
+    }
+
+
 def after_refuse(state: AgentState) -> str:
     """The web tier runs after a refusal and only when the flag is on."""
     return "web" if settings.enable_web_fallback else "end"
@@ -118,22 +159,28 @@ def _graph(retrieval_only: bool = False):
     graph = StateGraph(AgentState)
     for node in (plan, gather, exclusion_check, assemble):
         graph.add_node(node.__name__, node)
-    graph.add_edge(START, "plan")
     for before, after in (("plan", "gather"), ("gather", "exclusion_check"),
                           ("exclusion_check", "assemble")):
         graph.add_edge(before, after)
     if retrieval_only:
+        graph.add_edge(START, "plan")
         graph.add_edge("assemble", END)
         return graph.compile()
 
-    for node in (synthesize, retry, refuse, web_supplement):
+    for node in (guard_input, synthesize, retry, refuse, web_supplement, guard_output):
         graph.add_node(node.__name__, node)
+    graph.add_edge(START, "guard_input")
     for before, after in (("assemble", "synthesize"), ("retry", "assemble"),
-                          ("web_supplement", END)):
+                          ("web_supplement", "guard_output"), ("guard_output", END)):
         graph.add_edge(before, after)
-    outcomes = {"end": END, "retry": "retry", "refuse": "refuse"}
+    graph.add_conditional_edges(
+        "guard_input", after_guard_input, {"plan": "plan", "guard_output": "guard_output"}
+    )
+    outcomes = {"end": "guard_output", "retry": "retry", "refuse": "refuse"}
     graph.add_conditional_edges("synthesize", route, outcomes)
-    graph.add_conditional_edges("refuse", after_refuse, {"web": "web_supplement", "end": END})
+    graph.add_conditional_edges(
+        "refuse", after_refuse, {"web": "web_supplement", "end": "guard_output"}
+    )
     return graph.compile()
 
 
@@ -141,9 +188,9 @@ def _run(question: str, *, retrieval_only: bool = False) -> AgentState:
     start: AgentState = {
         "question": question, "sub_questions": [], "pools": {}, "checked": [],
         "context": [], "answer": "", "retries": 0, "steps": 0, "tokens": 0,
-        "web": [], "web_summary": "",
+        "web": [], "web_summary": "", "blocked": "", "guard": [], "disclaimer": "",
     }
-    limit = settings.max_agent_steps + 1  # LangGraph counts the start as a step
+    limit = settings.max_agent_steps + 1 + GUARD_NODES  # LangGraph counts the start as a step
     return _graph(retrieval_only).invoke(start, {"recursion_limit": limit})
 
 
@@ -156,16 +203,20 @@ def run_agent(question: str) -> AgentAnswer:
     """Run the graph for one question; the step cap and token budget are enforced inside."""
     final = _run(question)
     text, context = final["answer"], final["context"]
-    used = [] if text == REFUSAL else cited(text, context)
+    declined = text == REFUSAL or bool(final["blocked"])
+    used = [] if declined else cited(text, context)
     return AgentAnswer(
-        question=question,
+        question=final["question"],
         text=text,
-        chunks=[] if text == REFUSAL else used or context,
+        chunks=[] if declined else used or context,
         retrieved=context,
         checked=final["checked"],
         steps=final["steps"],
         tokens=final["tokens"],
-        cited_nothing=text != REFUSAL and not used,
+        cited_nothing=not declined and not used,
         web=final["web"],
         web_summary=final["web_summary"],
+        blocked=final["blocked"],
+        guard=final["guard"],
+        disclaimer=final["disclaimer"],
     )

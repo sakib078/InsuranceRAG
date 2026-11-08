@@ -26,6 +26,9 @@ class AgentState(TypedDict):
     tokens: int
     web: list[WebResult]
     web_summary: str
+    blocked: str
+    guard: list[str]
+    disclaimer: str
 
 
 @dataclass(frozen=True)
@@ -42,3 +45,6 @@ class AgentAnswer:
     cited_nothing: bool
     web: list[WebResult] = field(default_factory=list)
     web_summary: str = ""
+    blocked: str = ""
+    guard: list[str] = field(default_factory=list)
+    disclaimer: str = ""
