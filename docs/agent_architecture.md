@@ -37,7 +37,8 @@ layers are Phase 8.
   <img src="Images/agent_request_lifecycle.svg" alt="Request lifecycle" width="560">
 </p>
 
-One question, top to bottom. The only branches are the retry and the web tier.
+One question, top to bottom. The only branches are the retry and the web tier. The
+[guardrails](#guardrails) wrap this flow: one check before it, one after.
 
 ### Why a fixed graph and not a ReAct agent
 
@@ -50,7 +51,7 @@ diagrams is this graph, not a model: no model chooses which node runs next.
 ### Layer map
 
 **Agent** = calls an LLM. **Tool** = deterministic code, no model. **Graph** = the orchestrator.
-Two agents, six tools; the web tool can make one optional summary call.
+Two agents, seven tools; the web tool can make one optional summary call.
 
 | layer | type | graph node | code | calls | model |
 |---|---|---|---|---|---|
@@ -60,10 +61,11 @@ Two agents, six tools; the web tool can make one optional summary call.
 | Retrieval | Tool | `gather` | `search_corpus` per sub-question + `tools.expand` | hybrid search, chunk files | none |
 | Exclusion | Tool | `exclusion_check` | `tools.exclusion_pass` | hybrid search | none |
 | Assembler | Tool | `assemble` | `search.fuse` + `within_budget` | — | none |
-| Answer | **Agent** | `synthesize` | `SYSTEM` + one rule, `_chain()` | — | Groq `gpt-oss-120b` |
+| Answer | **Agent** | `synthesize` | `SYSTEM` (+ plain-language rule when guarded), `_chain()` | — | Groq `gpt-oss-120b` |
 | Citation verifier | Tool | inside `synthesize` | `cited()`, records `cited_nothing` | — | none |
 | Final check | Tool | retry edge | deterministic trigger in `graph.py` | — | none |
 | Web supplement | Tool | `web_supplement` | `web.py`, `web_summary.py` | search backends, page fetch | none; optional Gemini summary, flag-gated |
+| Guardrails | Tool | `guard_input`, `guard_output` | `policy.py`, `policy_rules.json` | — | none |
 
 ### Token budget
 
@@ -83,8 +85,9 @@ Planner Retrieval  Exclusion            ^        Answer +    ├─> refuse ─>
                                         └──── retry (<=1) ───┘   Final check
 ```
 
-The only conditional edges in the whole graph are the bounded retry and the web branch
-(see [Web supplement](#web-supplement)).
+The only conditional edges in the whole graph are the bounded retry, the web branch
+(see [Web supplement](#web-supplement)) and the stop after `guard_input`. `guard_input` runs
+first and `guard_output` last; every path ends in `guard_output` (see [Guardrails](#guardrails)).
 
 ---
 
@@ -308,7 +311,7 @@ invention, which is why it stays outside the measured path.
    user-generated sites such as Reddit, Facebook and Quora, and duplicate URLs.
 3. **Rank.** A result must contain at least 30% of the question's key words plus "Ontario".
    Official sites and regulators (`ontario.ca`, `fsrao.ca`, `ibc.ca`) move up; insurer and broker
-   sales pages move down.
+   sales pages are dropped (a guardrail rule).
 4. **Read pages.** The top 3 pages are downloaded (`robots.txt` respected, generic
    user-agent, 10 s and 1 MB limits). Menus and scripts are stripped, and up to 3 English paragraphs
    per page that mention Ontario are kept word for word. An unreadable page keeps its search snippet.
@@ -330,7 +333,7 @@ passages are shown on their own.
 |---|---|---|
 | Search | `ddgs` only, 3 results, the raw question | `ddgs` and SearXNG merged, 10 each, "Ontario auto insurance" added when missing |
 | Filter | none; an ad link and French text reached the user | ads, French pages, social sites and duplicate URLs dropped |
-| Rank | whatever order the engine returned | term overlap with the question and "Ontario" at 0.3 or more, official sites nudged up, sales pages down |
+| Rank | whatever order the engine returned | term overlap with the question and "Ontario" at 0.3 or more, official sites nudged up, sales pages dropped |
 | Read pages | none, 2 to 3 line snippets only | top 3 pages fetched (robots.txt respected), best 3 Ontario paragraphs each, word for word |
 | Summary | ruled out: no model text over web content | optional Gemini summary, kept only if it passes a faithfulness check |
 | Show | title, snippet and URL | summary, then numbered sources with passages, URL, date and labels |
@@ -419,8 +422,8 @@ def summarize(question: str, results: list[WebResult]) -> str          # web_sum
   from 1 s to over 50 s on the free tier.
 - The language check is a word-list heuristic, not a language detector, and there is no JavaScript
   rendering.
-- Advice-like wording copied from sources ("you can shop around") still passes; the banned-phrase
-  rules in the guardrails work will handle it.
+- Advice-like wording copied into a passage ("you can shop around") still passes; the guardrails
+  screen the summary, not the word-for-word passages.
 
 #### Try it
 
@@ -445,6 +448,64 @@ refusal text, never instead of it.
 
 **Tested by:** the three eval-safety guards, `tests/test_web.py` and `tests/test_web_summary.py`.
 
+### Guardrails
+
+**Job:** keep every answer inside the business rules: no advice, no selling, no legal strategy, and
+no personal data sent to a model.
+**Type:** Tool, plain code, no model call.
+**Files:** `policy.py`, `policy_rules.json`; the nodes `guard_input` and `guard_output` in `graph.py`.
+
+<p align="center">
+  <img src="Images/guardrails_flow.svg" alt="How the guardrails wrap the agent" width="640">
+</p>
+
+#### How it is built
+
+- **Rules are data.** The phrase lists, the six fixed replies, the four notes and the disclaimer
+  live in `policy_rules.json`; changing wording needs no code change. The personal-data patterns
+  live in `policy.py`.
+- **One way in, one way out.** Every question enters through `guard_input`; every answer, refusal
+  and stopped question leaves through `guard_output`, once.
+- **A stopped question costs nothing.** It skips the planner, the search and the model.
+- **Outside the step cap.** The two guard nodes are added to the recursion limit, not to `steps`.
+- **Switch.** `enable_guardrails` (on by default). Eval rows run with it off, which also leaves out
+  the plain-language prompt rule; `run_agent_eval --guards` measures the guarded product.
+
+#### What it checks
+
+| stage | check | result |
+|---|---|---|
+| Input | personal data (email, phone, postal code, policy and claim numbers, address) | replaced by `[LABEL]` before the planner, search, web query and logs |
+| Input | prompt injection | stopped, fixed reply |
+| Input | legal strategy ("will I win") | stopped, referral reply |
+| Input | recommend, quote, apply, "are you a broker" | stopped, fixed reply |
+| Input | other insurance lines, other provinces | stopped, redirect |
+| Input | "am I covered", complaints | answered, with a note |
+| Web | insurer and broker sales pages | dropped from the results |
+| Output | advice or certainty wording | whole answer replaced |
+| Output | phone numbers or links not in an excerpt | whole answer replaced |
+| Output | answer cut off mid-sentence | trimmed to the last full sentence, with a note |
+| Output | web summary with flagged wording | summary dropped |
+| Output | answered only after the retry | note to check it closely |
+| Output | every answer | disclaimer |
+
+#### What it will never do
+
+- **Call a model.** Both nodes are rules and patterns.
+- **Patch an answer.** A flagged answer is replaced whole, never edited.
+- **Block a real question.** No answerable golden question is stopped or changed, asserted by test.
+
+#### Known limits
+
+- Names are caught only after "my name is"; health details are not detected.
+- The scope check is a word list, not a classifier.
+- The cut-off check reads the text, not the model's finish reason.
+- Verbatim web passages are not screened for wording.
+- The guarded product has not been run on the generation row yet.
+
+**Tested by:** `tests/test_policy.py`: redaction, 32 adversarial and ordinary questions, output
+screening and the graph wiring.
+
 ### Backend API and session memory
 
 Both are Phase 8. The Backend API runs `run_agent` behind FastAPI; this phase builds everything
@@ -465,6 +526,7 @@ searxng_url:             str = ""          # empty skips the SearXNG fallback
 web_min_relevance:       float = 0.3       # share of the question's terms a web result must contain
 web_summary:             bool = False      # optional plain-language summary of the web passages
 web_summary_model:       str = "gemini/models/gemini-3.1-flash-lite"
+enable_guardrails:       bool = True       # false for every eval row
 ```
 
 `max_agent_steps` (10) and `enable_web_fallback` (False) also live in `config.py`.
@@ -473,7 +535,8 @@ web_summary_model:       str = "gemini/models/gemini-3.1-flash-lite"
 
 ## Tests and eval safety
 
-`tests/test_agent.py`, `tests/test_web.py` and `tests/test_web_summary.py`, synthesis mocked, 0 tokens.
+`tests/test_agent.py`, `tests/test_web.py`, `tests/test_web_summary.py` and `tests/test_policy.py`,
+synthesis mocked, 0 tokens.
 `tests/test_agent_integration.py` (marker `slow`) runs the retrieval nodes over the real corpus.
 
 | protects | test |
@@ -486,6 +549,7 @@ web_summary_model:       str = "gemini/models/gemini-3.1-flash-lite"
 | Web supplement, guard 2 | the graph reaches `END` from `refuse` without touching `web_supplement` when the flag is off |
 | Web supplement, guard 3 | no `WebResult` ever reaches `format_context` |
 | Web summary | a number the sources lack, an uncited sentence or a model failure drops the summary and shows only the passages; the summary flag off never calls the model |
+| Guardrails | a stopped question reaches no planner, search or model; a flagged answer is replaced and lists no sources; no answerable golden question is blocked; the longest path fits the step cap with both guards; the eval runner leaves them off |
 
 Three guards, because the flag now gates graph behaviour.
 
