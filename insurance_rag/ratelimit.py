@@ -20,7 +20,7 @@ _RETRY_AFTER_RE = re.compile(
 
 
 #: A per-day budget does not refill inside a run. Retrying one only fails slower.
-_DAILY_RE = re.compile(r"per day|TPD|RPD", re.IGNORECASE)
+_DAILY_RE = re.compile(r"per day|\bTPD\b|\bRPD\b", re.IGNORECASE)
 
 
 def is_daily_cap(exc: Exception) -> bool:

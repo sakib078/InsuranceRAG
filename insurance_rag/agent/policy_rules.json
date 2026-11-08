@@ -1,0 +1,117 @@
+{
+  "disclaimer": "General information only. This is not insurance or legal advice and not an official version of the law. Confirm with your insurer, a licensed broker, or a licensed Ontario lawyer or paralegal.",
+  "templates": {
+    "injection": "I can't act on that request. Ask me a question about Ontario auto insurance law and regulations.",
+    "legal": "I can't give legal advice or say how a claim or dispute will turn out. I can explain what the regulations say. For your own situation, speak to a licensed Ontario lawyer or paralegal, use your insurer's complaint process, or contact FSRA, the regulator. Confirm any deadlines with them.",
+    "recommend": "I can't recommend an insurer, a policy or a level of coverage, or say what you should buy. I can explain what Ontario's rules say about a coverage or a term. A licensed insurance broker or agent can advise you on a choice.",
+    "scope": "I only cover Ontario auto insurance law and regulations. For other types of insurance or other provinces, please ask a licensed professional.",
+    "unsafe": "I can't give that answer as written because it may read as advice or a promise about your own situation. I can explain what the regulations say. A licensed broker, or a licensed Ontario lawyer or paralegal, can advise you on your own case.",
+    "sell": "I'm a research assistant, not an insurance broker, agent, lawyer or insurer. I can't give quotes, take applications, arrange or change coverage, or negotiate a price. I can explain what Ontario's rules say. A licensed broker or your insurer can help with a quote or a purchase."
+  },
+  "input": [
+    {
+      "id": "injection",
+      "risk": "prompt injection",
+      "action": "block",
+      "patterns": [
+        "\\b(ignore|disregard|forget)\\b.{0,20}\\b(previous|prior|above|earlier|your|all)\\b.{0,20}\\b(instructions|rules|prompts?)\\b",
+        "\\b(reveal|show|print|repeat)\\b.{0,20}\\b(system prompt|your instructions|your prompt)\\b",
+        "\\byou are now\\b",
+        "\\bpretend (to be|you are)\\b",
+        "\\bjailbreak\\b",
+        "\\bdeveloper mode\\b"
+      ]
+    },
+    {
+      "id": "legal",
+      "risk": 3,
+      "action": "block",
+      "patterns": [
+        "\\bwill i (win|lose)\\b",
+        "\\bam i going to (win|lose)\\b",
+        "\\bshould i (sue|hire a lawyer)\\b",
+        "\\bdo i have a (legal )?case\\b",
+        "\\bhow (do|can|could) i (win|beat|fight)\\b",
+        "\\bhelp me (fight|dispute|appeal)\\b",
+        "\\bwhat should i do\\b.{0,40}\\b(denied|denial|rejected|refused|dispute|appeal)\\b"
+      ]
+    },
+    {
+      "id": "recommend",
+      "risk": 1,
+      "action": "block",
+      "patterns": [
+        "\\b(cheapest|best|top|lowest[- ]priced)\\b.{0,40}\\b(insurer|insurance compan(y|ies)|insurance provider|provider|broker)\\b",
+        "\\b(insurer|insurance compan(y|ies)|provider|broker)\\b.{0,40}\\b(cheapest|best|lowest)\\b",
+        "\\bwhich (insurer|insurance company|company|broker|provider|policy|coverage|deductible) (is|has|offers|should|would)\\b",
+        "\\bshould i (buy|get|choose|pick|switch|go with|take|add|drop)\\b",
+        "\\bwhat (coverage|policy|deductible|limit) should i\\b",
+        "\\brecommend (me )?(an?|the|some)\\b.{0,30}\\b(insur|polic|coverage|broker|deductible)"
+      ]
+    },
+    {
+      "id": "sell",
+      "risk": 1,
+      "action": "block",
+      "patterns": [
+        "\\b(get|give|send|run|need|want)\\b.{0,15}\\b(a |an |me a |me an )?(quote|quotation)\\b",
+        "\\bquote me\\b",
+        "\\b(sign|set|enrol+) me up\\b",
+        "\\b(buy|purchase|bind|activate|renew|cancel)\\b.{0,15}\\b(my |a |an |the )?(policy|coverage)\\b.{0,15}\\b(for me|through you|with you|now|today)\\b",
+        "\\bnegotiate\\b.{0,25}\\b(premium|rate|price)\\b",
+        "\\bare you (a |an )?(licensed |real )?(insurance )?(broker|agent|insurer|lawyer|adjuster)\\b"
+      ]
+    },
+    {
+      "id": "scope",
+      "risk": "scope",
+      "action": "block",
+      "unless": "ontario",
+      "patterns": [
+        "\\b(home|house|homeowner'?s?|tenant'?s?|renter'?s?|condo|life|travel|pet|health|dental|mortgage)\\s+insurance\\b",
+        "\\b(alberta|british columbia|b\\.c\\.|quebec|québec|manitoba|saskatchewan|nova scotia|new brunswick|newfoundland|prince edward island|yukon)\\b",
+        "\\b(usa|u\\.s\\.|united states|california|texas|florida)\\b"
+      ]
+    },
+    {
+      "id": "personal",
+      "risk": 2,
+      "action": "note",
+      "patterns": [
+        "\\bam i (definitely |fully |actually )?covered\\b",
+        "\\bwill (my|the) (claim|insurer|insurance company)\\b.{0,20}\\b(be )?(approved|paid|accepted|pay|cover|approve)\\b",
+        "\\bwill (they|it) (pay|cover|approve)\\b"
+      ]
+    },
+    {
+      "id": "complaint",
+      "risk": 7,
+      "action": "note",
+      "patterns": [
+        "\\bcomplain(t|ts|ing)?\\b",
+        "\\bombud(s)?(man|service)\\b"
+      ]
+    }
+  ],
+  "output": [
+    {
+      "id": "wording",
+      "risk": "1, 2, 6",
+      "patterns": [
+        "\\bguarantee[sd]?\\b",
+        "\\byou(?:'re| are) (definitely|certainly|fully|automatically) covered\\b",
+        "\\byou will (definitely |certainly )?(win|be paid|be approved|get paid|receive)\\b",
+        "\\byour claim will (definitely |certainly )?(be )?(approved|paid|accepted)\\b",
+        "\\byou should (buy|choose|get|switch|sue|hire|pick|take|file)\\b",
+        "\\b(i|we) (strongly )?recommend\\b",
+        "\\b(best|cheapest) (insurer|insurance company|insurance provider|policy)\\b"
+      ]
+    }
+  ],
+  "notes": {
+    "personal": "I can't tell whether you are covered or whether a claim will be paid; that depends on your policy and the facts of your case. Confirm with your insurer or a licensed broker.",
+    "complaint": "Complaint steps and deadlines can change; confirm them with your insurer's complaint process or FSRA, the regulator. I can't give contact details.",
+    "retried": "This answer needed a second search to find a supporting excerpt, so check it closely against the source.",
+    "trimmed": "The answer was cut off and shortened to its last complete sentence."
+  }
+}

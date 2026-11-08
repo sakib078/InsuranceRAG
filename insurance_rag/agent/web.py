@@ -124,7 +124,7 @@ TIER1 = (
     "canlii.org", "ribo.com", "giocanada.org", "lso.ca",
 )
 TIER2 = ("ratehub.ca", "rates.ca", "caa.ca", "insurance-canada.ca")
-#: Insurer and broker sales pages sell policies, so they rank last (business rule: no recommending).
+#: Insurer and broker sales pages sell policies, so they are dropped (no recommending).
 TIER3 = (
     "tdinsurance.com", "belairdirect.com", "intact.ca", "aviva.ca", "allstate.ca", "sonnet.ca",
     "rbcinsurance.com", "scotiainsurance.com", "pcinsurance.ca", "westernfinancialgroup.ca",
@@ -278,8 +278,9 @@ def _candidates(query: str) -> list[WebResult]:
 
 
 def web_supplement(question: str, *, k: int = 3) -> list[WebResult]:
-    """The most relevant public pages for a refused question, with their best passages."""
-    results = _relevant(question, _candidates(_query(question)))
+    """The most relevant non-sales public pages for a refused question, with their best passages."""
+    ranked = _relevant(question, _candidates(_query(question)))
+    results = [r for r in ranked if _tier_bonus(r.url) != TIER_BONUS[3]]  # business rule 1
     return [_with_passages(question, result) for result in results[:k]]
 
 

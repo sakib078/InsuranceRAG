@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import textwrap
 from datetime import UTC, datetime
 
 from insurance_rag.agent.web import render_web_block
@@ -24,6 +25,7 @@ def trace(result) -> None:
         "answer": result.text,
         "chunk_ids": [c.chunk_id for c in result.chunks],
         "locators": [c.locator for c in result.chunks],
+        "guard": getattr(result, "guard", []),
     }
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -56,8 +58,12 @@ def main() -> None:
         print("\nSources")
         for chunk in result.chunks:
             print("\n" + render_citation(chunk, index))
+            print(textwrap.indent(chunk.text, "  "))
         for note in licence_lines(result.chunks, index):
             print(f"\n{note}")
+
+    if getattr(result, "disclaimer", ""):
+        print(f"\n{result.disclaimer}")
 
     if not args.no_trace:
         trace(result)
