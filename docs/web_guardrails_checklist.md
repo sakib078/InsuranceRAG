@@ -22,7 +22,7 @@ Still open from A:
 
 ## B. Guardrails and policies around the agent
 
-### B0. Business rules (from the risk table below). Needs a lawyer's review before deployment.
+### B0. Business rules (from the risk table below). These seven are the full set.
 
 | # | Risk | When it becomes serious | How to reduce it | Guardrail in the agent |
 |---|---|---|---|---|
@@ -36,59 +36,68 @@ Still open from A:
 
 Source tags in the original text were not kept; the legal claims above are the author's and unverified.
 
-- [ ] Your further business rules and the exact disclaimer wording (send when ready).
+- [x] No further rules: the seven above are the full set, and all seven have a guard. The disclaimer
+      wording in `policy_rules.json` is the working text.
 
 ### B1. Policy layer
-- [ ] One config-driven policy module (`insurance_rag/agent/policy.py` plus a rules file), deterministic
-      first; an LLM classifier only if the rules prove too weak.
-- [ ] Two graph nodes: `guard_input` before `plan`, `guard_output` after the answer or refusal.
+- [x] One config-driven policy module (`insurance_rag/agent/policy.py` plus `policy_rules.json`),
+      deterministic first; an LLM classifier only if the rules prove too weak.
+- [x] Two graph nodes: `guard_input` before `plan`, `guard_output` after the answer or refusal
+      (`IRAG_ENABLE_GUARDRAILS`, forced off in the agent eval runner).
 
 ### B2. Input guardrails
-- [ ] Scope: Ontario auto insurance only; out-of-scope gets a polite redirect.
-- [ ] Detect requests for advice, recommendations, legal strategy or outcome predictions (rules 1 to 3).
-- [ ] Redact personal data (names, policy and claim numbers, health details, addresses, emails) before
-      any model call and before logging (rule 5).
-- [ ] Prompt-injection check on the question.
+- [x] Scope: other insurance lines, other provinces and the US get a polite redirect (a deny-list, not a
+      classifier).
+- [x] Stop recommendation, quote, application, "are you a broker" and legal-strategy questions; outcome questions ("am I covered") are answered
+      with an extra note (rules 1 to 3).
+- [x] Redact emails, phones, postal codes, policy and claim numbers, licence numbers, VINs, addresses and
+      "my name is X" before any model call, web query or log. Health details are not detected.
+- [x] Prompt-injection pattern check on the question.
 
 ### B3. Untrusted content
-- [ ] Treat retrieved and web text as data: delimit it, never follow instructions found inside it.
+- [x] Web text never enters the prompt (tested). Insurer and broker sales pages are dropped from web results.
+- [ ] Delimit corpus excerpts in the prompt as data (touches the shared `SYSTEM` prompt, so measure first).
 
 ### B4. Output guardrails
-- [ ] Standard disclaimer on every answer: general information, not insurance or legal advice, not an
-      official version, verify with your insurer or a licensed professional (rules 2, 3, 6).
-- [ ] Banned phrases ("guaranteed", "you will", "you are definitely covered", "you should buy") and advice
-      or prediction wording (rules 1, 2).
+- [x] Standard disclaimer on every answer (draft wording in `policy_rules.json`, yours to edit).
+- [x] Banned phrases and advice wording replace the whole answer; wording quoted from an excerpt is
+      allowed; phone numbers and URLs must come from an excerpt.
 - [ ] Keep the citation requirement, the revoked-law flag and the web-block labelling (rule 4).
-- [ ] Show the exact source passage with the answer; flag low confidence (rule 4).
-- [ ] State the jurisdiction and the law's consolidation date.
-- [ ] Handle a cut-off answer: "What changed with Ontario auto insurance?" ended mid-sentence because the
-      reply hit `max_tokens=1024`. Detect `finish_reason == "length"`, and either trim to the last
-      complete sentence with a note or ask for a shorter answer.
+- [x] Show the exact source passage (`scripts.ask` prints each cited chunk); an answer that needed the
+      retry carries a "check it closely" note (rule 4).
+- [x] Jurisdiction (the disclaimer) and the law's consolidation date (each source block shows it).
+- [x] Cut-off answer: an answer that stops mid-sentence is trimmed to the last full sentence. It reads
+      the text, not `finish_reason`; the exact check would change `_generate`'s return value.
 - [ ] Stop answering with tangential provisions (same question): refuse unless an excerpt directly
       answers it (see the memory note's fix 2).
 
 ### B5. Easy-to-understand language
-- [ ] Answer format: one-line answer first, then what the law says, then what it does not cover.
-- [ ] Short sentences and everyday words; explain defined terms (we already tag `defined_terms`).
-- [ ] A readability check on the golden answers and the five test questions.
+- [x] Answer format: a one-sentence answer, then at most two short sentences for a condition or
+      exception (`STYLE` in `graph.py`, active only with the guardrails on).
+- [x] Everyday words; a defined term is explained only if the answer uses it.
+- [x] Readability check on 4 golden questions (Flesch-Kincaid grade, citations stripped): gold answers
+      grade 14 to 19; the agent's grade 12 to 20, and the first, longer rule version was worse
+      (answers 2 to 4 times longer, with side paragraphs). The five web test questions cannot be
+      graded this way because they refuse.
 
 ### B6. Refusal and referral templates
-- [ ] Fixed wording for: no answer in the corpus, out of scope, needs a professional, web results shown.
-- [ ] Refer to a licensed broker, a licensed Ontario lawyer or paralegal, the insurer's complaint process,
+- [x] Fixed wording for: no answer in the corpus, out of scope, needs a professional, web results shown
+      (six templates and four notes are in `policy_rules.json`).
+- [x] Refer to a licensed broker, a licensed Ontario lawyer or paralegal, the insurer's complaint process,
       the ombudservice or FSRA, as general information; never invent contact details (rules 3, 7).
 
 ### B7. Audit trail and privacy
-- [ ] Log every policy decision with the question, answer and sources, redacted; decide retention
-      (rule 5).
+- [x] Every policy decision is in the `guard` field of the trace line, with the redacted question.
+- [ ] Retention rule for `traces.jsonl`: deferred to the API phase, when real users exist.
 
 ### B8. Tests
-- [ ] An adversarial question set: jailbreaks, "recommend an insurer", "will I win", personal data,
-      injection text.
-- [ ] Unit tests per rule; confirm guardrails do not lower golden-set correctness.
+- [ ] A larger adversarial question set (the unit tests cover a handful of each kind).
+- [x] Unit tests per rule (`tests/test_policy.py`); no answerable golden question is blocked or changed.
+- [ ] Confirm guardrails do not lower golden-set correctness on the generation row (guards are off in
+      the eval runner, so this needs a run with them on).
 
 ### B9. Review
-- [ ] Legal review of the rules, the disclaimer and the UI copy before deployment. This checklist is not
-      legal advice.
+- [x] Dropped: no legal review needed (the owner's decision, 2026-11-08).
 
 ---
 
