@@ -46,7 +46,12 @@
         "\\bwhich (insurer|insurance company|company|broker|provider|policy|coverage|deductible) (is|has|offers|should|would)\\b",
         "\\bshould i (buy|get|choose|pick|switch|go with|take|add|drop)\\b",
         "\\bwhat (coverage|policy|deductible|limit) should i\\b",
-        "\\brecommend (me )?(an?|the|some)\\b.{0,30}\\b(insur|polic|coverage|broker|deductible)"
+        "\\brecommend (me )?(an?|the|some)\\b.{0,30}\\b(insur|polic|coverage|broker|deductible)",
+        "\\b(cheapest|lowest[- ]priced?|best|top[- ]rated)\\b.{0,25}\\b(car|auto|automobile|vehicle)\\s+insurance\\b",
+        "\\b(best|cheapest|lowest)\\b.{0,15}\\b(rates?|premiums?|deals?|prices?)\\b",
+        "\\bwhich (insurer|insurance company|company|broker|provider|policy|coverage|plan|deductible)\\b.{0,15}\\bto (choose|pick|buy|get|take|go with)\\b",
+        "\\b(better|worse)\\b.{0,20}\\bthan\\b.{0,30}\\b(intact|aviva|belair(direct)?|desjardins|economical|wawanesa|co-?operators|allstate|td insurance|sonnet|rbc insurance|state farm)\\b",
+        "\\b(intact|aviva|belair(direct)?|desjardins|economical|wawanesa|co-?operators|allstate|td insurance|sonnet|rbc insurance|state farm)\\b.{0,30}\\b(better|worse)\\b"
       ]
     },
     {
@@ -59,7 +64,8 @@
         "\\b(sign|set|enrol+) me up\\b",
         "\\b(buy|purchase|bind|activate|renew|cancel)\\b.{0,15}\\b(my |a |an |the )?(policy|coverage)\\b.{0,15}\\b(for me|through you|with you|now|today)\\b",
         "\\bnegotiate\\b.{0,25}\\b(premium|rate|price)\\b",
-        "\\bare you (a |an )?(licensed |real )?(insurance )?(broker|agent|insurer|lawyer|adjuster)\\b"
+        "\\bare you (a |an )?(licensed |real )?(insurance )?(broker|agent|insurer|lawyer|adjuster)\\b",
+        "\\b(buy|purchase|get|arrange|set up|bind)\\b.{0,10}\\bme (a|an|the)\\b.{0,15}\\b(policy|coverage|insurance)\\b"
       ]
     },
     {

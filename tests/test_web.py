@@ -138,6 +138,12 @@ def test_insurer_and_broker_sales_pages_are_dropped(monkeypatch):
     assert web.web_supplement("Is auto insurance mandatory in Ontario?") == [info]
 
 
+def test_brokers_without_insurance_in_their_name_are_sales_pages():
+    hosts = ("isure.ca", "instasure.ca", "policyme.com", "canadadrives.ca", "ratehub.ca")
+    for host in (*hosts, "rates.ca"):
+        assert web._tier_bonus(f"https://www.{host}/x") == web.TIER_BONUS[3]
+
+
 def test_overlap_counts_the_questions_terms_in_the_text():
     question = "Is auto insurance mandatory in Ontario?"
     assert web._overlap(question, "Mandatory auto insurance in Ontario") == 1.0

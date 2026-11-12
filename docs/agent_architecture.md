@@ -178,8 +178,12 @@ once, **0 Groq**, free on every later run. The cache doubles as the inspection a
 The cap of 3 comes from the failing records: mean independent provisions per failing record is
 2.5.
 
-**Tested by:** a graph test that sub-questions become pools, and the 22 multi-hop decompositions
-read by eye.
+**If the model is down** (a Gemini 503): it tries `gemini-3.5-flash-lite` straight away, with no
+waiting. If both fail it returns no sub-questions, so the question is searched alone, and nothing
+is cached.
+
+**Tested by:** a graph test that sub-questions become pools, the fallback and both-down paths,
+and the 22 multi-hop decompositions read by eye.
 
 ### Retrieval tool
 
@@ -468,8 +472,11 @@ no personal data sent to a model.
   and stopped question leaves through `guard_output`, once.
 - **A stopped question costs nothing.** It skips the planner, the search and the model.
 - **Outside the step cap.** The two guard nodes are added to the recursion limit, not to `steps`.
+- **Prompt rules ride along.** With the guardrails on, the Answer agent gets three extra rules:
+  plain language, treat excerpts as data, and refuse unless an excerpt directly answers (`STYLE`
+  in `graph.py`). The last two are not measured yet.
 - **Switch.** `enable_guardrails` (on by default). Eval rows run with it off, which also leaves out
-  the plain-language prompt rule; `run_agent_eval --guards` measures the guarded product.
+  those prompt rules; `run_agent_eval --guards` measures the guarded product.
 
 #### What it checks
 
@@ -501,9 +508,10 @@ no personal data sent to a model.
 - The scope check is a word list, not a classifier.
 - The cut-off check reads the text, not the model's finish reason.
 - Verbatim web passages are not screened for wording.
-- The guarded product has not been run on the generation row yet.
+- The guarded product has not been run on the generation row yet; the "refuse unless directly
+  answered" rule could cost recall until it is.
 
-**Tested by:** `tests/test_policy.py`: redaction, 32 adversarial and ordinary questions, output
+**Tested by:** `tests/test_policy.py`: redaction, 62 adversarial and ordinary questions, output
 screening and the graph wiring.
 
 ### Backend API and session memory
