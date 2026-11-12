@@ -115,3 +115,41 @@ def test_budget_stops_the_run(monkeypatch):
     say(monkeypatch, REFUSAL, tokens=settings.agent_token_budget + 1)
     with pytest.raises(BudgetExceeded):
         graph.run_agent("q")
+
+
+def _planner_models(monkeypatch, failing):
+    """Replace the planner's model with one that raises for the models named in `failing`."""
+    import insurance_rag.agent.decompose as planner
+
+    tried = []
+
+    def fake(provider, model, max_tokens=None):
+        class Chat:
+            def invoke(self, messages):
+                tried.append(model)
+                if model in failing:
+                    raise RuntimeError("503 UNAVAILABLE")
+                return type("Reply", (), {"content": "- first\n- second"})()
+
+        return Chat()
+
+    monkeypatch.setattr(planner, "chat_model", fake)
+    return planner, tried
+
+
+def test_the_planner_falls_back_when_its_model_is_down(monkeypatch, tmp_path):
+    planner, tried = _planner_models(monkeypatch, {"models/gemini-3.1-flash-lite"})
+    cache = tmp_path / "cache.jsonl"
+    assert planner.decompose("q", cache=cache) == ["first", "second"]
+    assert tried == ["models/gemini-3.1-flash-lite", "models/gemini-3.5-flash-lite"]
+    assert cache.exists()
+
+
+def test_the_planner_gives_no_sub_questions_and_caches_nothing_when_both_models_are_down(
+    monkeypatch, tmp_path
+):
+    planner, tried = _planner_models(
+        monkeypatch, {"models/gemini-3.1-flash-lite", "models/gemini-3.5-flash-lite"}
+    )
+    cache = tmp_path / "cache.jsonl"
+    assert planner.decompose("q", cache=cache) == [] and not cache.exists()

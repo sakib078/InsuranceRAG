@@ -90,8 +90,7 @@ class Settings(BaseSettings):
         "gemini/models/gemini-3.1-flash-lite,"
         "groq/qwen/qwen3.8-27b,"
         "nvidia/z-ai/glm-5.3-flash,"
-        "openrouter/google/gemma-4-31b-it:free,"
-        "nvidia/deepseek-ai/deepseek-v4-flash-0731"
+        "openrouter/google/gemma-4-31b-it:free"
     )
 
     # --- agent ---

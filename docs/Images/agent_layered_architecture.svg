@@ -42,6 +42,13 @@
   <text x="970" y="406" text-anchor="middle" font-size="12" fill="#475569">tracks progress and budget</text>
   <line x1="752" y1="393" x2="838" y2="393" stroke="#475569" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
 
+  <!-- guardrails -->
+  <rect x="45" y="355" width="190" height="76" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+  <text x="140" y="386" text-anchor="middle" font-weight="700" fill="#1e3a8a">Guardrails</text>
+  <text x="140" y="405" text-anchor="middle" font-size="12" fill="#1e3a8a">checks the question in</text>
+  <text x="140" y="421" text-anchor="middle" font-size="12" fill="#1e3a8a">and the answer out</text>
+  <line x1="237" y1="415" x2="408" y2="415" stroke="#475569" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
+
   <!-- answer to user -->
   <path d="M410,393 H250 V120 H478" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrP)"/>
   <text x="258" y="262" font-size="11" fill="#7c3aed">answer to user</text>

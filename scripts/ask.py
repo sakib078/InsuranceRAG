@@ -7,6 +7,7 @@ import json
 import textwrap
 from datetime import UTC, datetime
 
+from insurance_rag.agent.policy import redact
 from insurance_rag.agent.web import render_web_block
 from insurance_rag.config import settings
 from insurance_rag.generation.chain import answer
@@ -21,8 +22,8 @@ def trace(result) -> None:
         "at": datetime.now(UTC).isoformat(),
         "encoder": str(settings.encoder),
         "model": settings.generation_model,
-        "question": result.question,
-        "answer": result.text,
+        "question": redact(result.question)[0],
+        "answer": redact(result.text)[0],
         "chunk_ids": [c.chunk_id for c in result.chunks],
         "locators": [c.locator for c in result.chunks],
         "guard": getattr(result, "guard", []),

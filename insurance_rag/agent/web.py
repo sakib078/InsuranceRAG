@@ -123,7 +123,7 @@ TIER1 = (
     "ontario.ca", "fsrao.ca", "ibc.ca", "insurancehotline.com", "tribunalsontario.ca",
     "canlii.org", "ribo.com", "giocanada.org", "lso.ca",
 )
-TIER2 = ("ratehub.ca", "rates.ca", "caa.ca", "insurance-canada.ca")
+TIER2 = ("caa.ca", "insurance-canada.ca")
 #: Insurer and broker sales pages sell policies, so they are dropped (no recommending).
 TIER3 = (
     "tdinsurance.com", "belairdirect.com", "intact.ca", "aviva.ca", "allstate.ca", "sonnet.ca",
@@ -131,6 +131,7 @@ TIER3 = (
     "mitchinsurance.com", "thepersonal.com", "cooperators.ca", "wawanesa.com", "caasco.com",
     "acumeninsurance.com", "myinsurancebroker.com", "easilyinsured.ca", "surex.com",
     "mcdougallinsurance.com", "westlandinsurance.ca", "e2gold.ca",
+    "isure.ca", "instasure.ca", "policyme.com", "canadadrives.ca", "ratehub.ca", "rates.ca",
 )
 SALES_WORDS = ("insur", "broker")
 TIER_BONUS = {1: 0.25, 2: 0.05, 3: -0.15}
