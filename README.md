@@ -6,7 +6,7 @@ Every answer cites a provision you can open on ontario.ca and read yourself — 
 The interesting part isn't the pipeline; it's that the whole thing is measured against a
 hand-labelled golden set, so the weak spots are numbers rather than opinions.
 
-> **Status:** end-to-end and measured. Dense + BM25 hybrid retrieval; agent next.
+> **Status:** end-to-end and measured. Hybrid retrieval plus an agent with guardrails; production next.
 
 > [!TIP]
 > **What it costs to run:** about **a tenth of a cent per question** and **$0.20 per eval run**
@@ -116,16 +116,17 @@ law back, with no signal that the other half exists.
 | Ingestion | Docling for PDF layout, direct DOM walk for e-Laws HTML | built |
 | Chunking | One provision per chunk, never merged across clauses | built |
 | Retrieval | Qwen3-Embedding-0.6B + BM25, fused by RRF → ParadeDB (Postgres + pgvector + pg_search) | built |
-| Generation | `gpt-oss-120b`, open weights, served by Groq | built |
+| Generation | `gpt-oss-120b`, open weights, pay-per-token on Vertex AI (Groq for the first three rows) | built |
+| Agent | LangGraph: planner, mandatory exclusion pass, one bounded retry, guardrails | built |
 | Eval | Own locator-based evaluators + LangSmith judges | built |
-| Next | LangGraph agent with a mandatory exclusion check | planned |
+| Next | Public API and deploy | planned |
 
 One Postgres holds the chunks, the embeddings and the BM25 index — rather than a vector
 database beside a search engine.
 
 The retrieval metrics need no API key: they're set arithmetic over clause locators, so
-`run_eval --suite retrieval` reproduces offline. Only the LLM-judged metrics need keys, and
-every provider used is on a free tier.
+`run_eval --suite retrieval` reproduces offline. Only generation and the LLM-judged metrics need
+model access: Vertex AI, pay-per-token, about $0.20 per eval run, with free-tier judges as fallbacks.
 
 ## Quickstart
 

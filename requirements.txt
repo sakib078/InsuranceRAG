@@ -33,6 +33,8 @@ certifi==2026.10.23
     #   langchain-core
     #   langchain-openai
     #   requests
+cffi==2.1.1
+    # via cryptography
 charset-normalizer==3.5.1
     # via requests
 click==8.5.0
@@ -45,6 +47,8 @@ colorama==0.4.6
     # via
     #   tqdm
     #   typer
+cryptography==50.0.2
+    # via google-auth
 ddgs==9.16.1
     # via insurance-rag (pyproject.toml)
 defusedxml==0.7.1
@@ -73,6 +77,8 @@ fsspec==2026.7.0
     # via
     #   huggingface-hub
     #   torch
+google-auth==2.62.2
+    # via insurance-rag (pyproject.toml)
 greenlet==3.5.5
     # via sqlalchemy
 h11==0.16.0
@@ -255,6 +261,12 @@ psycopg-binary==3.3.5
     # via psycopg
 psycopg-pool==3.3.1
     # via langchain-postgres
+pyasn1==0.6.5
+    # via pyasn1-modules
+pyasn1-modules==0.4.2
+    # via google-auth
+pycparser==3.12
+    # via cffi
 pydantic==2.13.5
     # via
     #   insurance-rag (pyproject.toml)

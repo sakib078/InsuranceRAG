@@ -32,7 +32,7 @@ CUSTOM_EVALUATORS = (*RETRIEVAL_EVALUATORS, citation_accuracy_eval)
 #: Metric print order; `{k}` is the depth the row was scored at.
 METRIC_ORDER = (
     "recall@{k}_single", "recall@{k}_multi", "exclusion_recall", "citation_accuracy",
-    "correctness", "relevance", "groundedness", "retrieval_relevance",
+    "correctness", "groundedness",
 )
 
 #: Max share of failed targets tolerated before the row is invalid.
@@ -225,7 +225,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="dense_clause_aware", help="name for this row")
     parser.add_argument("-k", type=int, default=settings.rerank_top_k)
     parser.add_argument("--dataset", default=settings.langsmith_dataset)
-    # The judge's free tier is the bottleneck, not the pipeline.
+    # Judge rate limits are the bottleneck, not the pipeline.
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--pin-k", type=int, default=None,
                         help="generation: fix k and skip the retry ladder, ~40%% fewer tokens")

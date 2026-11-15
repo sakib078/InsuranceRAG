@@ -1,4 +1,4 @@
-"""Token budget for the whole process: fail before Groq's daily cap, not after."""
+"""Token budget for the whole process: fail at the budget, before a provider cap or bill does."""
 
 from __future__ import annotations
 
