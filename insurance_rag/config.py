@@ -71,11 +71,12 @@ class Settings(BaseSettings):
     uniform_chunk_tokens: int = 512  # baseline row only
     uniform_overlap_tokens: int = 64
 
-    # --- generation (groq | gemini, see insurance_rag/providers.py) ---
+    # --- generation (groq | gemini | vertex, see insurance_rag/providers.py) ---
     generation_provider: str = "groq"
     # Optional so ingestion and retrieval run without it; `chain.py` fails loudly when it is needed.
     groq_api_key: str | None = Field(default=None, description="IRAG_GROQ_API_KEY, from .env")
     generation_model: str = "openai/gpt-oss-120b"
+    vertex_project: str = ""  # Google Cloud project for the vertex provider
 
     # --- evaluation: judge runs off a different provider; keys are unprefixed in .env ---
     gemini_eval_key: str | None = Field(default=None, validation_alias="GEMINI_API_EVAL_KEY")
