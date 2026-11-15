@@ -42,6 +42,7 @@ def generation_target(question: str) -> dict:
         **_retrieved(result.retrieved),
         "answer": result.text,
         "cited_locators": [c.locator for c in result.chunks],
+        "blocked": result.blocked,
     }
 
 

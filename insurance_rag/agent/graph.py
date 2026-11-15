@@ -17,6 +17,7 @@ from insurance_rag.generation.chain import (
     USER,
     cited,
     format_context,
+    tidy,
 )
 from insurance_rag.providers import chat_model
 from insurance_rag.ratelimit import with_retry
@@ -56,7 +57,7 @@ def _generate(context: str, question: str) -> tuple[str, int]:
     """The one Groq call; the plain-language rule rides with the guardrails (eval rows omit it)."""
     chain = _chain(settings.enable_guardrails)
     message = with_retry(lambda: chain.invoke({"context": context, "question": question}))
-    return message.content.strip(), (message.usage_metadata or {}).get("total_tokens", 0)
+    return tidy(message.content), (message.usage_metadata or {}).get("total_tokens", 0)
 
 
 def guard_input(state: AgentState) -> dict:
