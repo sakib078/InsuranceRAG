@@ -8,6 +8,11 @@ hand-labelled golden set, so the weak spots are numbers rather than opinions.
 
 > **Status:** end-to-end and measured. Dense + BM25 hybrid retrieval; agent next.
 
+> [!TIP]
+> **What it costs to run:** about **a tenth of a cent per question** and **$0.20 per eval run**
+> on Vertex AI, or **~$5 a month** at 100 questions a day.
+> → [Unit economics](docs/unit_economics.md)
+
 ## Results
 
 62 hand-written question/answer pairs, each labelled with the clauses that should be
@@ -19,10 +24,19 @@ through the retry ladder, which re-asks at top-20 after a refusal.
 | Dense only | 0.667 | 0.095 | 0.462 | 0.499 | 0.710 | 0.661 |
 | + BM25 sparse, fused by RRF | 0.708 | 0.095 | 0.500 | 0.520 | 0.726 | 0.677 |
 | **+ retry ladder (shipped)** | **0.708** | 0.111 | **0.478** | **0.633** | **0.807** | **0.774** |
-| + agent with coverage loop | — | — | — | — | — | pending |
+| + retry ladder, rerun on Vertex AI (control) | 0.708 | 0.143 | 0.500 | 0.675 | 0.806 | 0.823 |
+| **+ agent with coverage loop and guardrails** | **0.917** | 0.318 | **0.769** | **0.730** | **0.855** | **0.852** |
 
 One variable per row. BM25 adds +0.016 correctness — one answer in 62, so direction rather than
 result. The ladder re-asks refusals against the top-20 pool and carries correctness to **0.807**.
+
+The last two rows run on Vertex AI (the same gpt-oss-120b, judged by gemini-3.5-flash-lite), all
+62 scored. Rerun with only a formatting change, the control moved 2–3 answers per column, so
+gaps that size are direction. Against it the agent gains 3 correct answers (53 against 50) and
+5.5 points of citation accuracy; groundedness is judged on 61, since the guardrails stop one
+question before any excerpt is read. Without guardrails the agent scores 0.871 correctness,
+0.742 citation accuracy, 0.758 groundedness. \* The agent reads about 13 chunks, so its retrieval
+is scored at that size, not at top-5.
 
 Two caveats on the ladder row. Five records hit a provider daily cap twice, so every column but
 groundedness is a mean over 57; groundedness covers all 62 because those five were graded

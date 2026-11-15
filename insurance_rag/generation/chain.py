@@ -118,9 +118,9 @@ def cited(text: str, chunks: list[Chunk]) -> list[Chunk]:
 
 
 def _locator_re(locator: str) -> re.Pattern[str]:
-    """The whole locator only: `s. 1` must not match inside `s. 18`, `s. 1(2)` or `s. 1 #2`."""
+    """The whole locator only: `s. 1` never matches `s. 18` or `s. 1(2)`, but `s. 1(a)` cites it."""
     escaped = re.escape(unicodedata.normalize("NFKC", locator))
-    return re.compile(rf"(?<![\w/]){escaped}(?![\w(]| [“#])")
+    return re.compile(rf"(?<![\w/]){escaped}(?!\w|\(\d| [“#])")
 
 
 def answer(question: str, *, k: int | None = None) -> Answer:
