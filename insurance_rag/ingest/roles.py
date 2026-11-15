@@ -13,7 +13,7 @@ _TRIGGERS: tuple[tuple[ChunkRole, tuple[str, ...]], ...] = (
     (ChunkRole.EXCLUSION, (
         "won't cover", "will not cover", "not covered", "we will not pay",
         "does not apply", "do not apply", "is not required to pay", "no benefit is payable",
-        "not entitled to",
+        "not entitled",
     )),
     (ChunkRole.CONDITION, (
         "statutory condition", "you must", "the insured shall", "only if", "provided that",
@@ -46,6 +46,11 @@ def defined_terms_in(text: str, terms: set[str]) -> tuple[str, ...]:
     return tuple(sorted(t for t in terms if t in lowered))
 
 
+def _starts_a_word(scope: str, needles: tuple[str, ...]) -> bool:
+    """A needle must start a word, so "insured" is not found inside "uninsured"."""
+    return any(re.search(rf"(?<!\w){re.escape(n)}", scope) for n in needles)
+
+
 def classify_role(
     text: str, ancestor_path: tuple[str, ...], locator: str, heading: str = ""
 ) -> ChunkRole:
@@ -58,7 +63,7 @@ def classify_role(
         if not scope:
             continue
         for role, needles in _HEADING_ROLES:
-            if any(n in scope for n in needles):
+            if _starts_a_word(scope, needles):
                 return role
 
     lowered = text.lower()
