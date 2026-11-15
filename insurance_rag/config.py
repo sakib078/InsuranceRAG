@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     agent_decompose: bool = True  # false skips the Planner, for ablation rows
     agent_max_sub_questions: int = 3
     decompose_model: str = "gemini/models/gemini-3.1-flash-lite"
+    decompose_fallback_model: str = "gemini/models/gemini-3.5-flash-lite"  # when the planner fails
     agent_context_tokens: int = 3000  # half of the 6000-token single-shot context
     agent_token_budget: int = 185_000  # stop before Groq's 200k daily cap
     enable_web_fallback: bool = False  # must stay false for every eval run
@@ -106,7 +107,7 @@ class Settings(BaseSettings):
     searxng_url: str = ""  # e.g. http://localhost:8080; empty skips the SearXNG fallback
     web_min_relevance: float = 0.3  # share of the question's terms a web result must contain
     web_summary: bool = False  # a plain-language model summary above the web passages
-    web_summary_model: str = "gemini/models/gemini-3.1-flash-lite"  # Gemini: no Groq budget used
+    web_summary_model: str = "gemini/models/gemini-3.1-flash-lite"  # free tier unless .env sets it
 
     # --- tracing ---
     trace_log_path: Path = DATA_DIR / "traces.jsonl"

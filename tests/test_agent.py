@@ -121,6 +121,8 @@ def _planner_models(monkeypatch, failing):
     """Replace the planner's model with one that raises for the models named in `failing`."""
     import insurance_rag.agent.decompose as planner
 
+    monkeypatch.setattr(settings, "decompose_model", "gemini/models/gemini-3.1-flash-lite")
+    monkeypatch.setattr(settings, "decompose_fallback_model", "gemini/models/gemini-3.5-flash-lite")
     tried = []
 
     def fake(provider, model, max_tokens=None):
