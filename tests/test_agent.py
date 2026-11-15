@@ -179,6 +179,11 @@ def test_vertex_signs_every_request_with_a_fresh_google_token(monkeypatch):
     providers.chat_model.cache_clear()
 
 
+def test_the_questions_own_hits_come_first_so_the_cut_cannot_drop_them(chunks):
+    pools = {"main": chunks[4:6], "sub:0": chunks[:4], "exclusion": [chunks[0]]}
+    assert tools.assemble(pools, limit=10**6)[:3] == [chunks[0], chunks[4], chunks[5]]
+
+
 def test_the_planner_gives_no_sub_questions_and_caches_nothing_when_both_models_are_down(
     monkeypatch, tmp_path
 ):

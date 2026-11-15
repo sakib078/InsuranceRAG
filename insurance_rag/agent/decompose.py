@@ -20,12 +20,15 @@ FALLBACK_MODEL = "gemini/models/gemini-3.5-flash-lite"
 
 DECOMPOSE_SYSTEM = """You help search Ontario auto insurance law. A question may need several \
 separate provisions to answer. Write one short search query per provision needed, one per line, \
-at most {limit}. If one provision is enough, write the question once. No numbering, \
-no commentary."""
+at most {limit}. Describe what each provision says in plain words; never write a section, \
+regulation or form number the question does not give. If one provision is enough, write the \
+question once. No numbering, no commentary."""
 
 
 def _key(question: str) -> str:
-    return hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
+    """The prompt is part of the key, so a changed prompt asks again, not reuses old plans."""
+    prompt = DECOMPOSE_SYSTEM.format(limit=settings.agent_max_sub_questions)
+    return hashlib.sha256(f"{prompt}\n{question}".encode()).hexdigest()[:16]
 
 
 def _load(path: Path) -> dict[str, list[str]]:

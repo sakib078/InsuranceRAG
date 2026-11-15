@@ -1,0 +1,49 @@
+{
+  "config": "agent_v2_planner",
+  "suite": "retrieval",
+  "at": "2026-11-14T23:58:30.252300+00:00",
+  "k": 25,
+  "encoder": "qwen3",
+  "agent": "graph, planner gemini/models/gemini-3.1-flash-lite, context 3000 tokens, guardrails off",
+  "records": 62,
+  "scores": {
+    "recall@25_single": 0.9166666666666666,
+    "recall@25_multi": 0.2727272727272727,
+    "exclusion_recall": 0.7307692307692307,
+    "context_chunks": 13.14516129032258,
+    "context_tokens": 2755.8387096774195
+  },
+  "misses": {
+    "recall@25_single": [
+      "g-005",
+      "g-062"
+    ],
+    "recall@25_multi": [
+      "g-020",
+      "g-022",
+      "g-023",
+      "g-024",
+      "g-025",
+      "g-026",
+      "g-027",
+      "g-028",
+      "g-029",
+      "g-030",
+      "g-032",
+      "g-034",
+      "g-035",
+      "g-036",
+      "g-037",
+      "g-038"
+    ],
+    "exclusion_recall": [
+      "g-020",
+      "g-029",
+      "g-030",
+      "g-034",
+      "g-035",
+      "g-038",
+      "g-062"
+    ]
+  }
+}
