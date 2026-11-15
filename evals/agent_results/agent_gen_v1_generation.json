@@ -1,0 +1,22 @@
+{
+  "config": "agent_gen_v1",
+  "suite": "generation",
+  "at": "2026-11-14T23:02:19.684949+00:00",
+  "encoder": "qwen3",
+  "agent": "graph, planner gemini/models/gemini-3.1-flash-lite, context 3000 tokens, guardrails off",
+  "generation": "vertex/openai/gpt-oss-120b-maas",
+  "judge_chain": "gemini/models/gemini-3.5-flash-lite,gemini/models/gemini-3.1-flash-lite,groq/qwen/qwen3.8-27b,nvidia/z-ai/glm-5.3-flash,openrouter/google/gemma-4-31b-it:free",
+  "judges_served": {
+    "gemini/models/gemini-3.5-flash-lite": 124
+  },
+  "records": 62,
+  "scores": {
+    "recall@5_single": 0.625,
+    "recall@5_multi": 0.047619047619047616,
+    "exclusion_recall": 0.46153846153846156,
+    "citation_accuracy": 0.6505376344086022,
+    "correctness": 0.8064516129032258,
+    "groundedness": 0.8225806451612904
+  },
+  "misses": {}
+}
