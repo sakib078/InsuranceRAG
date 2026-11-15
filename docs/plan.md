@@ -626,7 +626,7 @@ since iteration 1. No new dependencies — psycopg is already installed.
 
 ## Phase 7 — The agent
 
-LangGraph, per spec v2 §05. The spec names four tools — `search_corpus`, `resolve_definition`,
+LangGraph, per spec v2.05. The spec names four tools — `search_corpus`, `resolve_definition`,
 `fetch_neighbors`, `list_documents` — of which one is dropped and two are adapted on
 measurements taken since; see the design doc linked below.
 
