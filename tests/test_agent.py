@@ -62,6 +62,22 @@ def test_refusal_retries_once_then_refuses_within_the_cap(monkeypatch):
     assert result.steps == 9 <= settings.max_agent_steps
 
 
+@pytest.mark.parametrize("text, cites", [
+    ("Benefits start after a week [O. Reg. 34/10 s. 6(2)(a)].", True),  # g-006, a paragraph
+    ("See [O. Reg. 34/10 s. 6(2)] and (b).", True),
+    ("See [O. Reg. 34/10 s. 6(2.1)].", False),  # a different subsection
+    ("See [O. Reg. 34/10 s. 6(20)].", False),
+    ("See [O. Reg. 34/10 s. 6(2) #2].", False),
+])
+def test_a_paragraph_pinpoint_cites_the_subsection_that_holds_it(text, cites):
+    from types import SimpleNamespace
+
+    from insurance_rag.generation.chain import cited
+
+    chunk = SimpleNamespace(locator="O. Reg. 34/10 s. 6(2)")
+    assert cited(text, [chunk]) == ([chunk] if cites else [])
+
+
 def test_uncited_answer_after_the_retry_is_a_refusal(monkeypatch):
     say(monkeypatch, "An answer that cites nothing.")
     assert graph.run_agent("q").text == REFUSAL
