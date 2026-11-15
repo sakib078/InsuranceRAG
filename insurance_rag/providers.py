@@ -34,7 +34,35 @@ PROVIDERS: dict[str, tuple[str, str, str]] = {
         "nvidia_api_key",
         "build.nvidia.com - free Developer Program, no card",
     ),
+    # The field holds a project, not a key: the token comes from gcloud's login.
+    "vertex": (
+        "https://aiplatform.googleapis.com/v1/projects/{}/locations/global/endpoints/openapi",
+        "vertex_project",
+        "IRAG_VERTEX_PROJECT, then run `gcloud auth application-default login` once",
+    ),
 }
+
+
+def _google_auth():
+    """An httpx auth that puts a fresh Google Cloud token on every request; tokens last ~1h."""
+    import threading
+
+    import google.auth
+    import httpx
+    from google.auth.transport.requests import Request
+
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    lock = threading.Lock()
+
+    class GoogleAuth(httpx.Auth):
+        def auth_flow(self, request):
+            with lock:
+                if not creds.valid:
+                    creds.refresh(Request())
+                request.headers["Authorization"] = f"Bearer {creds.token}"
+            yield request
+
+    return GoogleAuth()
 
 
 @lru_cache(maxsize=8)
@@ -50,8 +78,15 @@ def chat_model(provider: str, model: str, *, max_tokens: int | None = None):
     if not api_key:
         raise SystemExit(f"{provider} needs a key in .env - see {where}")
 
+    client = {}
+    if provider == "vertex":
+        from openai import DefaultHttpxClient
+
+        base_url, api_key = base_url.format(api_key), "unused"
+        client = {"http_client": DefaultHttpxClient(auth=_google_auth())}
     return ChatOpenAI(
-        model=model, api_key=api_key, base_url=base_url, temperature=0, max_tokens=max_tokens
+        model=model, api_key=api_key, base_url=base_url, temperature=0, max_tokens=max_tokens,
+        **client,
     )
 
 

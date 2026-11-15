@@ -15,17 +15,18 @@ __all__ = ["DECOMPOSE_SYSTEM", "decompose", "build_cache"]
 log = logging.getLogger(__name__)
 
 CACHE = DATA_DIR / "decompositions.jsonl"
-#: Tried when the planner model is down (a 503 under load); a sibling on the same key.
-FALLBACK_MODEL = "gemini/models/gemini-3.5-flash-lite"
 
 DECOMPOSE_SYSTEM = """You help search Ontario auto insurance law. A question may need several \
 separate provisions to answer. Write one short search query per provision needed, one per line, \
-at most {limit}. If one provision is enough, write the question once. No numbering, \
-no commentary."""
+at most {limit}. Describe what each provision says in plain words; never write a section, \
+regulation or form number the question does not give. If one provision is enough, write the \
+question once. No numbering, no commentary."""
 
 
 def _key(question: str) -> str:
-    return hashlib.sha256(question.encode("utf-8")).hexdigest()[:16]
+    """The prompt is part of the key, so a changed prompt asks again, not reuses old plans."""
+    prompt = DECOMPOSE_SYSTEM.format(limit=settings.agent_max_sub_questions)
+    return hashlib.sha256(f"{prompt}\n{question}".encode()).hexdigest()[:16]
 
 
 def _load(path: Path) -> dict[str, list[str]]:
@@ -39,7 +40,7 @@ def _ask(question: str) -> list[str] | None:
     """One model call, repeated on the fallback model; None when both are unavailable."""
     limit = settings.agent_max_sub_questions
     messages = [("system", DECOMPOSE_SYSTEM.format(limit=limit)), ("human", question)]
-    for spec in dict.fromkeys((settings.decompose_model, FALLBACK_MODEL)):
+    for spec in dict.fromkeys((settings.decompose_model, settings.decompose_fallback_model)):
         provider, model = spec.split("/", 1)
         try:  # no waiting here: a 503 is cheaper to route around than to sleep through
             reply = chat_model(provider, model, max_tokens=256).invoke(messages)

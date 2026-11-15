@@ -121,6 +121,8 @@ def _planner_models(monkeypatch, failing):
     """Replace the planner's model with one that raises for the models named in `failing`."""
     import insurance_rag.agent.decompose as planner
 
+    monkeypatch.setattr(settings, "decompose_model", "gemini/models/gemini-3.1-flash-lite")
+    monkeypatch.setattr(settings, "decompose_fallback_model", "gemini/models/gemini-3.5-flash-lite")
     tried = []
 
     def fake(provider, model, max_tokens=None):
@@ -143,6 +145,45 @@ def test_the_planner_falls_back_when_its_model_is_down(monkeypatch, tmp_path):
     assert planner.decompose("q", cache=cache) == ["first", "second"]
     assert tried == ["models/gemini-3.1-flash-lite", "models/gemini-3.5-flash-lite"]
     assert cache.exists()
+
+
+def test_vertex_signs_every_request_with_a_fresh_google_token(monkeypatch):
+    import google.auth
+    import google.auth.transport.requests
+    import httpx
+
+    from insurance_rag import providers
+
+    class Creds:
+        valid, token, refreshes = False, None, 0
+
+        def refresh(self, request):
+            self.refreshes += 1
+            self.valid, self.token = True, f"token{self.refreshes}"
+
+    creds = Creds()
+    monkeypatch.setattr(google.auth, "default", lambda scopes: (creds, "project"))
+    monkeypatch.setattr(google.auth.transport.requests, "Request", lambda: None)
+    monkeypatch.setattr(settings, "vertex_project", "demo")
+    providers.chat_model.cache_clear()
+    model = providers.chat_model("vertex", "openai/gpt-oss-120b-maas")
+    assert model.openai_api_base == (
+        "https://aiplatform.googleapis.com/v1/projects/demo/locations/global/endpoints/openapi"
+    )
+
+    def sign():
+        request = httpx.Request("POST", "https://example.test")
+        return next(model.http_client.auth.auth_flow(request)).headers["Authorization"]
+
+    assert sign() == sign() == "Bearer token1"  # reused while valid
+    creds.valid = False
+    assert sign() == "Bearer token2"  # refreshed once expired
+    providers.chat_model.cache_clear()
+
+
+def test_the_questions_own_hits_come_first_so_the_cut_cannot_drop_them(chunks):
+    pools = {"main": chunks[4:6], "sub:0": chunks[:4], "exclusion": [chunks[0]]}
+    assert tools.assemble(pools, limit=10**6)[:3] == [chunks[0], chunks[4], chunks[5]]
 
 
 def test_the_planner_gives_no_sub_questions_and_caches_nothing_when_both_models_are_down(

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 660" width="980" height="660" font-family="Segoe UI, Arial, sans-serif">
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker></defs>
+<rect width="980" height="660" fill="#ffffff"/>
+<text x="30" y="36" font-size="22" font-weight="700" fill="#0f172a" text-anchor="start">Production architecture</text>
+<text x="30" y="58" font-size="13" font-weight="400" fill="#64748b" text-anchor="start">One small server, one compose file, one deploy path.</text>
+
+<rect x="390" y="84" width="200" height="50" rx="10" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+<text x="490" y="110" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">Browser</text>
+<text x="490" y="126" font-size="12" font-weight="400" fill="#0f172a" text-anchor="middle">the demo page</text>
+<line x1="490" y1="134" x2="490" y2="184" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+<text x="502" y="164" font-size="12" font-weight="600" fill="#475569" text-anchor="start">HTTPS</text>
+
+<rect x="210" y="186" width="560" height="330" rx="14" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="226" y="208" font-size="13" font-weight="400" fill="#64748b" text-anchor="start">One server, docker compose</text>
+
+<rect x="390" y="220" width="200" height="54" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+<text x="490" y="244" font-size="15" font-weight="700" fill="#1e3a8a" text-anchor="middle">Caddy</text>
+<text x="490" y="262" font-size="12" font-weight="400" fill="#1e3a8a" text-anchor="middle">HTTPS and the web page</text>
+<line x1="490" y1="274" x2="490" y2="314" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+<rect x="340" y="316" width="300" height="76" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+<text x="490" y="342" font-size="15" font-weight="700" fill="#1e3a8a" text-anchor="middle">API (FastAPI)</text>
+<text x="490" y="361" font-size="12" font-weight="400" fill="#1e3a8a" text-anchor="middle">guard in, agent, guard out</text>
+<text x="490" y="378" font-size="12" font-weight="400" fill="#1e3a8a" text-anchor="middle">encoder loaded once</text>
+
+<line x1="410" y1="392" x2="330" y2="432" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+<rect x="230" y="434" width="200" height="60" rx="10" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+<text x="330" y="460" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">ParadeDB</text>
+<text x="330" y="478" font-size="12" font-weight="400" fill="#0f172a" text-anchor="middle">vectors and BM25, on a volume</text>
+
+<line x1="570" y1="392" x2="650" y2="432" stroke="#475569" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<rect x="550" y="434" width="200" height="60" rx="10" fill="#f1f5f9" stroke="#64748b" stroke-width="2" stroke-dasharray="7 4"/>
+<text x="650" y="460" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">SearXNG</text>
+<text x="650" y="478" font-size="12" font-weight="400" fill="#0f172a" text-anchor="middle">optional web search</text>
+
+<line x1="640" y1="354" x2="798" y2="354" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+<text x="719" y="346" font-size="12" font-weight="600" fill="#475569" text-anchor="middle">model calls</text>
+<rect x="800" y="316" width="160" height="76" rx="10" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+<text x="880" y="342" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">Groq, Gemini</text>
+<text x="880" y="361" font-size="12" font-weight="400" fill="#0f172a" text-anchor="middle">answer and planner</text>
+
+<rect x="20" y="216" width="160" height="60" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+<text x="100" y="242" font-size="15" font-weight="700" fill="#1e3a8a" text-anchor="middle">GitHub Actions</text>
+<text x="100" y="260" font-size="12" font-weight="400" fill="#1e3a8a" text-anchor="middle">test, gate, build</text>
+<line x1="100" y1="276" x2="100" y2="334" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+<text x="110" y="310" font-size="12" font-weight="600" fill="#475569" text-anchor="start">push</text>
+<rect x="20" y="336" width="160" height="60" rx="10" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+<text x="100" y="362" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">Image registry</text>
+<text x="100" y="380" font-size="12" font-weight="400" fill="#0f172a" text-anchor="middle">ECR</text>
+<line x1="180" y1="366" x2="338" y2="366" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+<text x="259" y="358" font-size="12" font-weight="600" fill="#475569" text-anchor="middle">pull, restart</text>
+
+<line x1="330" y1="494" x2="330" y2="546" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+<text x="342" y="526" font-size="12" font-weight="600" fill="#475569" text-anchor="start">nightly dump</text>
+<rect x="230" y="548" width="200" height="44" rx="10" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+<text x="330" y="575" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">S3 backups</text>
+
+<rect x="30" y="622" width="18" height="18" rx="4" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+<text x="56" y="636" font-size="12.5" font-weight="400" fill="#475569" text-anchor="start">Our code and containers</text>
+<rect x="240" y="622" width="18" height="18" rx="4" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="266" y="636" font-size="12.5" font-weight="400" fill="#475569" text-anchor="start">Services and data</text>
+<rect x="410" y="622" width="18" height="18" rx="4" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="436" y="636" font-size="12.5" font-weight="400" fill="#475569" text-anchor="start">Optional</text>
+</svg>

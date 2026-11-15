@@ -43,8 +43,9 @@ def exclusion_pass(question: str, *, k: int = 10, weights: dict[str, float] = WE
 def assemble(
     pools: dict[str, list[Chunk]], *, limit: int = settings.agent_context_tokens
 ) -> list[Chunk]:
-    """One RRF union of every pool, the exclusion pass's top 2 first, cut to the token limit."""
-    floor = pools.get("exclusion", [])[:2]
+    """RRF union of the pools, cut to the limit; exclusion top 2 and the question's hits first."""
+    first = pools.get("exclusion", [])[:2] + pools.get("main", [])
+    floor = list({c.chunk_id: c for c in first}.values())
     kept = {c.chunk_id for c in floor}
     union = fuse(pools, k=sum(len(pool) for pool in pools.values()))
     rest = [hit.chunk for hit in union if hit.chunk.chunk_id not in kept]

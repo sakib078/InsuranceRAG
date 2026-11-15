@@ -9,7 +9,7 @@ from insurance_rag.agent import budget, graph, tools, web
 from insurance_rag.agent.policy import check_input, check_output, redact, rules
 from insurance_rag.agent.web import WebResult
 from insurance_rag.config import settings
-from insurance_rag.generation.chain import REFUSAL
+from insurance_rag.generation.chain import REFUSAL, tidy
 from insurance_rag.retrieval.search import Hit
 from insurance_rag.retrieval.store import read_chunks
 
@@ -341,3 +341,43 @@ def test_the_trace_line_never_holds_the_raw_question(monkeypatch, tmp_path):
     ask.trace(SimpleNamespace(question="mail sam@example.com", text="ok", chunks=[], guard=[]))
     line = (tmp_path / "traces.jsonl").read_text(encoding="utf-8")
     assert "sam@example.com" not in line and "[EMAIL]" in line
+
+
+@pytest.mark.parametrize("raw", [  # g-051, g-014 and g-015 of the Vertex rows, shortened
+    "Within 10 business days.【O. Reg. 34/10 s. 45(3)】【O. Reg. 34/10 s. 45(5)】",
+    "Notify within seven days【R.R.O. 1990, Reg. 676 s. 3(2)]】【FSRA approved form OAP 1 s. 1.4]",
+    "Sue within one year [​R.S.O. 1990, c. I.8 s. 259.1​]【R.R.O. 1990, Reg. 676 s. 8(2)]].",
+])
+def test_the_models_citation_marks_reach_the_guard_as_plain_brackets(raw):
+    text = tidy(raw)
+    assert not set(text) & set("【】​") and text.count("[") == text.count("]") == 2
+    assert check_output(text, "", text, "", []).answer == text  # the trim leaves it whole
+
+
+def test_the_agent_and_the_single_shot_chain_both_tidy_the_reply(monkeypatch, chunks):
+    from insurance_rag.generation import chain
+
+    reply = f" It is capped. 【{chunks[0].locator}】 "
+    message = type("Message", (), {"content": reply, "usage_metadata": {}})()
+
+    def replying(value):
+        return type("Chain", (), {"invoke": lambda self, payload: value})()
+
+    monkeypatch.setattr(graph, "_chain", lambda plain: replying(message))
+    monkeypatch.setattr(chain, "_chain", lambda: replying(reply))
+    monkeypatch.setattr(chain, "search_corpus", lambda question, k: chunks[:1])
+    expected = f"It is capped. [{chunks[0].locator}]"
+    assert graph._generate("context", "q")[0] == chain.answer("q", k=1).text == expected
+
+
+def test_a_blocked_question_is_not_judged_for_groundedness(monkeypatch):
+    import importlib
+
+    from evals.run_agent_eval import generation_target
+
+    judged = importlib.import_module("evals.langsmith.groundedness")
+    monkeypatch.setattr(judged, "grade", lambda *args: pytest.fail("judge called"))
+    monkeypatch.setattr(settings, "enable_guardrails", True)
+    outputs = generation_target("which insurance company has the cheapest auto rates in Ontario?")
+    assert outputs["blocked"] == "recommend"
+    assert judged.groundedness({}, outputs) == {"key": "groundedness", "score": None}

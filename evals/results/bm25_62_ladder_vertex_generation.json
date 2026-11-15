@@ -1,0 +1,22 @@
+{
+  "config": "bm25_62_ladder_vertex",
+  "suite": "generation",
+  "at": "2026-11-14T22:45:08.254410+00:00",
+  "encoder": "qwen3",
+  "retrieval": "dense 50 (w=1.0) + sparse 20 (w=0.7) -> RRF k=60 (no rerank - see artifacts/rerank.py), ladder",
+  "generation": "vertex/openai/gpt-oss-120b-maas",
+  "judge_chain": "gemini/models/gemini-3.5-flash-lite,gemini/models/gemini-3.1-flash-lite,groq/qwen/qwen3.8-27b,nvidia/z-ai/glm-5.3-flash,openrouter/google/gemma-4-31b-it:free",
+  "judges_served": {
+    "gemini/models/gemini-3.5-flash-lite": 124
+  },
+  "records": 62,
+  "scores": {
+    "recall@5_single": 0.7083333333333334,
+    "recall@5_multi": 0.14285714285714285,
+    "exclusion_recall": 0.5,
+    "citation_accuracy": 0.6263440860215054,
+    "correctness": 0.8387096774193549,
+    "groundedness": 0.7741935483870968
+  },
+  "misses": {}
+}

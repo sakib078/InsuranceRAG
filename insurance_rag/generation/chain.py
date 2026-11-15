@@ -13,9 +13,21 @@ from insurance_rag.ratelimit import with_retry
 from insurance_rag.retrieval.search import search_corpus
 from insurance_rag.schema import Chunk
 
-__all__ = ["Answer", "answer", "cited", "format_context", "LADDER", "REFUSAL"]
+__all__ = ["Answer", "answer", "cited", "format_context", "tidy", "LADDER", "REFUSAL"]
 
 REFUSAL = "This corpus does not address that."
+
+#: gpt-oss writes some citations as 【…】, mixes them with […] and pads them with zero-width marks.
+_CITATION_MARKS = str.maketrans(
+    {"【": "[", "】": "]", "​": None, "‌": None, "‍": None, "⁠": None,
+     "﻿": None}
+)
+
+
+def tidy(text: str) -> str:
+    """One citation style: 【…】 becomes […], doubled brackets collapse, zero-width marks go."""
+    text = text.translate(_CITATION_MARKS)
+    return re.sub(r"\]{2,}", "]", re.sub(r"\[{2,}", "[", text)).strip()
 
 #: Widen the window on a refusal before believing it; no k=50 rung (HTTP 413).
 LADDER: tuple[int, ...] = (settings.rerank_top_k, settings.ladder_top_k)
@@ -119,7 +131,7 @@ def answer(question: str, *, k: int | None = None) -> Answer:
         if not retrieved:
             break
         payload = {"context": format_context(retrieved), "question": question}
-        text = with_retry(lambda payload=payload: _chain().invoke(payload)).strip()
+        text = tidy(with_retry(lambda payload=payload: _chain().invoke(payload)))
         if REFUSAL not in text:
             # A cited-nothing answer is a prompt failure, not a reason to drop the provenance.
             return Answer(question, text, cited(text, retrieved) or retrieved, retrieved)

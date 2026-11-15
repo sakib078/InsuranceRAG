@@ -30,6 +30,7 @@ dependencies = [
     # config
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
+    "google-auth>=2.62.2",
 ]
 
 [project.optional-dependencies]

@@ -71,11 +71,12 @@ class Settings(BaseSettings):
     uniform_chunk_tokens: int = 512  # baseline row only
     uniform_overlap_tokens: int = 64
 
-    # --- generation (groq | gemini, see insurance_rag/providers.py) ---
+    # --- generation (groq | gemini | vertex, see insurance_rag/providers.py) ---
     generation_provider: str = "groq"
     # Optional so ingestion and retrieval run without it; `chain.py` fails loudly when it is needed.
     groq_api_key: str | None = Field(default=None, description="IRAG_GROQ_API_KEY, from .env")
     generation_model: str = "openai/gpt-oss-120b"
+    vertex_project: str = ""  # Google Cloud project for the vertex provider
 
     # --- evaluation: judge runs off a different provider; keys are unprefixed in .env ---
     gemini_eval_key: str | None = Field(default=None, validation_alias="GEMINI_API_EVAL_KEY")
@@ -98,6 +99,7 @@ class Settings(BaseSettings):
     agent_decompose: bool = True  # false skips the Planner, for ablation rows
     agent_max_sub_questions: int = 3
     decompose_model: str = "gemini/models/gemini-3.1-flash-lite"
+    decompose_fallback_model: str = "gemini/models/gemini-3.5-flash-lite"  # when the planner fails
     agent_context_tokens: int = 3000  # half of the 6000-token single-shot context
     agent_token_budget: int = 185_000  # stop before Groq's 200k daily cap
     enable_web_fallback: bool = False  # must stay false for every eval run
@@ -105,7 +107,7 @@ class Settings(BaseSettings):
     searxng_url: str = ""  # e.g. http://localhost:8080; empty skips the SearXNG fallback
     web_min_relevance: float = 0.3  # share of the question's terms a web result must contain
     web_summary: bool = False  # a plain-language model summary above the web passages
-    web_summary_model: str = "gemini/models/gemini-3.1-flash-lite"  # Gemini: no Groq budget used
+    web_summary_model: str = "gemini/models/gemini-3.1-flash-lite"  # free tier unless .env sets it
 
     # --- tracing ---
     trace_log_path: Path = DATA_DIR / "traces.jsonl"
