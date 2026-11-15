@@ -8,6 +8,11 @@ hand-labelled golden set, so the weak spots are numbers rather than opinions.
 
 > **Status:** end-to-end and measured. Dense + BM25 hybrid retrieval; agent next.
 
+> [!TIP]
+> **What it costs to run:** about **a tenth of a cent per question** and **$0.20 per eval run**
+> on Vertex AI, or **~$5 a month** at 100 questions a day.
+> → [Unit economics](docs/unit_economics.md)
+
 ## Results
 
 62 hand-written question/answer pairs, each labelled with the clauses that should be
