@@ -14,7 +14,6 @@ DATA_DIR = REPO_ROOT / "data"
 RAW_HTML_DIR = DATA_DIR / "raw_html"
 PDF_DIR = DATA_DIR / "pdfs"
 EVALS_DIR = REPO_ROOT / "evals"
-RESULTS_DIR = EVALS_DIR / "results"
 
 
 class Chunking(StrEnum):
@@ -101,7 +100,7 @@ class Settings(BaseSettings):
     decompose_model: str = "gemini/models/gemini-3.1-flash-lite"
     decompose_fallback_model: str = "gemini/models/gemini-3.5-flash-lite"  # when the planner fails
     agent_context_tokens: int = 3000  # half of the 6000-token single-shot context
-    agent_token_budget: int = 185_000  # stop before Groq's 200k daily cap
+    agent_token_budget: int = 185_000  # under Groq's 200k daily cap; raise it on Vertex
     enable_web_fallback: bool = False  # must stay false for every eval run
     enable_guardrails: bool = True  # must be false for every eval run
     searxng_url: str = ""  # e.g. http://localhost:8080; empty skips the SearXNG fallback

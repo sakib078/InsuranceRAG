@@ -34,7 +34,7 @@ def retrieval_target(question: str, k: int) -> dict:
 
 
 def generation_target(question: str) -> dict:
-    """The agent end to end: one Groq call, two with the retry."""
+    """The agent end to end: one answer call, two with the retry."""
     from insurance_rag.agent.graph import run_agent
 
     result = run_agent(question)

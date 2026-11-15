@@ -258,7 +258,8 @@ the web tier stays off (`enable_web_fallback=False`).
 **Open-weight model, no Anthropic credits.** `openai/gpt-oss-120b` served by Groq's free tier.
 `_model()` is the only place the provider appears; `IRAG_GENERATION_MODEL` swaps the model with
 no code change. `temperature=0`, so the same question gives the same answer — Phase 4 diffs
-these against a golden set.
+these against a golden set. Later changed: `providers.chat_model` replaced `ChatGroq`, and the
+measured rows since the Vertex control run on Vertex AI, pay-per-token.
 
 ### Step 3 — `scripts/ask.py`
 

@@ -36,7 +36,7 @@
 <line x1="640" y1="354" x2="798" y2="354" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
 <text x="719" y="346" font-size="12" font-weight="600" fill="#475569" text-anchor="middle">model calls</text>
 <rect x="800" y="316" width="160" height="76" rx="10" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
-<text x="880" y="342" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">Groq, Gemini</text>
+<text x="880" y="342" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">Vertex AI</text>
 <text x="880" y="361" font-size="12" font-weight="400" fill="#0f172a" text-anchor="middle">answer and planner</text>
 
 <rect x="20" y="216" width="160" height="60" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>

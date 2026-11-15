@@ -52,7 +52,7 @@ def _chain(plain: bool):
 
 
 def _generate(context: str, question: str) -> tuple[str, int]:
-    """The one Groq call; the plain-language rule rides with the guardrails (eval rows omit it)."""
+    """The one answer call; the plain-language rule rides with the guardrails (evals omit it)."""
     chain = _chain(settings.enable_guardrails)
     message = with_retry(lambda: chain.invoke({"context": context, "question": question}))
     return tidy(message.content), (message.usage_metadata or {}).get("total_tokens", 0)
